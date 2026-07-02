@@ -5,11 +5,48 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Templates/SubclassOf.h"
+#include "AmbientEncounterDefinitionTypes.h"
 #include "AmbientDirector.generated.h"
 
 class APawn;
 class AAmbientCandidateMarker;
 class AAmbientRegionVolume;
+class AAmbientEncounterPoint;
+class AAmbientPlaceholderEncounter;
+class UAmbientEncounterDefinitionData;
+
+UENUM(BlueprintType)
+enum class EAmbientEncounterRuntimeState : uint8
+{
+	Waiting UMETA(DisplayName = "Waiting"),
+	Active UMETA(DisplayName = "Active"),
+	Cleanup UMETA(DisplayName = "Cleanup"),
+	Cooldown UMETA(DisplayName = "Cooldown")
+};
+
+USTRUCT(BlueprintType)
+struct FAmbientEncounterHistoryEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FName EncounterId = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FName RegionName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FName SourcePointName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	float StartedAtTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	float FinishedAtTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FString FinishReason = TEXT("None");
+};
 
 USTRUCT(BlueprintType)
 struct FAmbientWorldState
@@ -63,6 +100,48 @@ struct FAmbientWorldState
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FString CandidateRejectReason = TEXT("No candidate evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bHasSelectedEncounterPoint = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FName SelectedEncounterPointName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FVector SelectedEncounterPointLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString SelectedEncounterPointReason = TEXT("No encounter point evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bPrototypeEncounterConditionMet = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bHasActivePrototypeEncounter = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString PrototypeEncounterBlockReason = TEXT("Prototype condition not evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString PrototypeEncounterRuntimeReason = TEXT("Runtime not evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float DistanceToPrototypeEncounter = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float PrototypeCleanupRemaining = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float PrototypeCooldownRemaining = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	int32 PrototypeEncounterStartCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	int32 PrototypeEncounterFinishCount = 0;
 };
 
 UCLASS(Blueprintable)
@@ -90,6 +169,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawRegionDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	bool bDrawEncounterPointDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	bool bDrawEncounterRuntimeDebug = true;
 
 	// ===== Debug Marker =====
 
@@ -130,12 +215,64 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "10.0", Units = "cm"))
 	float CandidateDebugRadius = 50.f;
 
+	// ===== Encounter Definition =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
+	TObjectPtr<UAmbientEncounterDefinitionData> PrototypeEncounterDefinitionAsset = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
+	FAmbientEncounterDefinition PrototypeEncounterDefinition;
+
+	// ===== Encounter Runtime =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime", meta = (ClampMin = "1"))
+	int32 MaxHistoryEntries = 8;
+
+
 	// ===== World State =====
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FAmbientWorldState CurrentWorldState;
 
+	// ===== World State References =====
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	TObjectPtr<AAmbientRegionVolume> CurrentRegion = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Prototype")
+	TObjectPtr<AAmbientEncounterPoint> SelectedEncounterPoint = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Prototype")
+	TObjectPtr<AAmbientPlaceholderEncounter> ActivePrototypeEncounter = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	int32 PrototypeEncounterStartCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	int32 PrototypeEncounterFinishCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FName RuntimeEncounterRegionName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FName RuntimeEncounterPointName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	float RuntimeEncounterStartedAtTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	float PrototypeCleanupEndTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	float PrototypeCooldownEndTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FString PendingPrototypeFinishReason = TEXT("None");
+
 
 private:
 	UFUNCTION()
@@ -144,6 +281,34 @@ private:
 	void UpdateCandidateLocation(const APawn* PlayerPawn);
 
 	void UpdateCurrentRegion(const APawn* PlayerPawn);
+
+	void SelectEncounterPoint();
+
+	void EvaluatePrototypeEncounterCondition();
+
+	void UpdatePrototypeEncounter();
+
+	const FAmbientEncounterDefinition& GetPrototypeEncounterDefinition() const;
+
+	bool TrySpawnOrUpdatePrototypeEncounter();
+
+	void StartPrototypeEncounter();
+
+	void BeginPrototypeCleanup(const FString& Reason);
+
+	void FinishPrototypeEncounter(const FString& Reason);
+
+	void StartPrototypeCooldown();
+
+	void DestroyPrototypeEncounter();
+
+	void AddPrototypeHistoryEntry(float FinishedAtTimeSeconds, const FString& FinishReason);
+
+	void SyncPrototypeRuntimeWorldState();
+
+	float GetDistanceFromPlayerToPrototypeEncounter() const;
+
+	FString GetPrototypeRuntimeStateString() const;
 
 	bool ProjectPointToGround(
 		const FVector& Point,
@@ -177,7 +342,16 @@ private:
 	// ===== Debug Properties =====
 	void PrintWorldStateDebug() const;
 
+	void PrintEncounterDebug() const;
+
+	void PrintEncounterHistoryDebug() const;
+
 	void DrawCandidateDebug() const;
 
 	void DrawRegionDebug() const;
+
+	void DrawEncounterPointDebug() const;
+
+	void DrawEncounterRuntimeDebug() const;
+
 };
