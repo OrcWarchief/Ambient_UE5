@@ -5,6 +5,7 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
+#include "GameplayTagContainer.h"
 
 
 // Sets default values
@@ -22,6 +23,11 @@ AAmbientRegionVolume::AAmbientRegionVolume()
 
 	RegionBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RegionBounds->SetGenerateOverlapEvents(false);
+
+	RegionTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Region.Showroom"),
+		false
+	);
 }
 
 bool AAmbientRegionVolume::ContainsWorldLocation(const FVector& WorldLocation) const

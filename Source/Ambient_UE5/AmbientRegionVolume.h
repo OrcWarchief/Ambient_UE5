@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "GameFramework/Actor.h"
 #include "AmbientRegionVolume.generated.h"
 
@@ -27,6 +28,8 @@ public:
 
 	const UBoxComponent* GetRegionBounds() const { return RegionBounds; }
 
+	FGameplayTag GetRegionTag() const { return RegionTag; }
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -36,6 +39,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	FName RegionName = TEXT("Region.Showroom");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region", meta = (Categories = "Region"))
+	FGameplayTag RegionTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	int32 Priority = 0;

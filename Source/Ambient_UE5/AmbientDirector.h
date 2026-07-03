@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "GameFramework/Actor.h"
 #include "Templates/SubclassOf.h"
 #include "AmbientEncounterDefinitionTypes.h"
@@ -75,6 +76,15 @@ struct FAmbientWorldState
 	int32 CurrentRegionPriority = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bHasCurrentRegionTag = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FGameplayTag CurrentRegionTag;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FGameplayTagContainer WorldTags;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bHasCandidateLocation = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
@@ -114,6 +124,18 @@ struct FAmbientWorldState
 	FString SelectedEncounterPointReason = TEXT("No encounter point evaluated");
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bHasSelectedEncounterDefinition = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FName SelectedEncounterDefinitionId = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float SelectedEncounterDefinitionScore = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString SelectedEncounterDefinitionReason = TEXT("No encounter definition selected");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bPrototypeEncounterConditionMet = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
@@ -142,6 +164,30 @@ struct FAmbientWorldState
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	int32 PrototypeEncounterFinishCount = 0;
+};
+
+USTRUCT(BlueprintType) // debug only data
+struct FAmbientEncounterSelectionDebugEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	bool bAccepted = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FName EncounterId = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FName PointName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	float Score = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	float DistanceToPoint = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FString Reason = TEXT("Not evaluated");
 };
 
 UCLASS(Blueprintable)
@@ -217,9 +263,17 @@ protected:
 
 	// ===== Encounter Definition =====
 
+	// Slice 22 이후 권장 방식
+	// Director가 여러 Encounter 정의 에셋을 평가 후 최적의 에셋 선택
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
+	TArray<TObjectPtr<UAmbientEncounterDefinitionData>> EncounterDefinitionAssets;
+
+	// 기존 단일 Encounter 정의 에셋 fallback
+	// 배열이 비어 있을 때 이전 설정 호환용으로 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
 	TObjectPtr<UAmbientEncounterDefinitionData> PrototypeEncounterDefinitionAsset = nullptr;
 
+	// Data Asset이 없을 때 사용할 인라인 Encounter 정의값
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
 	FAmbientEncounterDefinition PrototypeEncounterDefinition;
 
@@ -242,6 +296,30 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Prototype")
 	TObjectPtr<AAmbientPlaceholderEncounter> ActivePrototypeEncounter = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	TObjectPtr<UAmbientEncounterDefinitionData> SelectedEncounterDefinitionAsset = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FAmbientEncounterDefinition SelectedEncounterDefinition;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	bool bHasSelectedEncounterDefinition = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	float SelectedEncounterScore = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FString SelectedEncounterReason = TEXT("No encounter selected");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	TArray<FAmbientEncounterSelectionDebugEntry> LastSelectionDebugEntries;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FAmbientEncounterDefinition RuntimeEncounterDefinition;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	bool bHasRuntimeEncounterDefinition = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
@@ -282,7 +360,31 @@ private:
 
 	void UpdateCurrentRegion(const APawn* PlayerPawn);
 
-	void SelectEncounterPoint();
+	void SelectEncounterDefinitionAndPoint();
+
+	bool EvaluateEncounterDefinitionCandidate(
+		const FAmbientEncounterDefinition& Definition,
+		FAmbientEncounterSelectionDebugEntry& OutDebugEntry,
+		AAmbientEncounterPoint*& OutBestPoint
+	) const;
+
+	AAmbientEncounterPoint* FindBestEncounterPointForDefinition(
+		const FAmbientEncounterDefinition& Definition,
+		float& OutDistanceToPoint,
+		FString& OutReason
+	) const;
+
+	bool DoesEncounterDefinitionMatchCurrentWorld(
+		const FAmbientEncounterDefinition& Definition,
+		FString& OutReason
+	) const;
+
+	bool DoesEncounterPointMatchDefinition(
+		const AAmbientEncounterPoint* Point,
+		const FAmbientEncounterDefinition& Definition
+	) const;
+
+	bool HasRecentlyFinishedEncounter(FName EncounterId) const;
 
 	void EvaluatePrototypeEncounterCondition();
 
@@ -345,6 +447,8 @@ private:
 	void PrintEncounterDebug() const;
 
 	void PrintEncounterHistoryDebug() const;
+
+	void PrintSelectionDebug() const;
 
 	void DrawCandidateDebug() const;
 

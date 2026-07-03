@@ -16,6 +16,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
+#include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
@@ -65,6 +66,11 @@ void AAmbientDirector::UpdateWorldState()
 	CurrentWorldState = FAmbientWorldState();
 	CurrentRegion = nullptr;
 	SelectedEncounterPoint = nullptr;
+	SelectedEncounterDefinitionAsset = nullptr;
+	bHasSelectedEncounterDefinition = false;
+	SelectedEncounterScore = 0.0f;
+	SelectedEncounterReason = TEXT("No encounter selected");
+	LastSelectionDebugEntries.Reset();
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -89,7 +95,7 @@ void AAmbientDirector::UpdateWorldState()
 
 		UpdateCurrentRegion(PlayerPawn);
 		UpdateCandidateLocation(PlayerPawn);
-		SelectEncounterPoint();
+		SelectEncounterDefinitionAndPoint();
 		EvaluatePrototypeEncounterCondition();
 	}
 	else
@@ -125,6 +131,7 @@ void AAmbientDirector::UpdateWorldState()
 	if (bPrintDebug)
 	{
 		PrintWorldStateDebug();
+		PrintSelectionDebug();
 		PrintEncounterDebug();
 		PrintEncounterHistoryDebug();
 	}
@@ -287,27 +294,232 @@ void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 		CurrentWorldState.bHasCurrentRegion = true;
 		CurrentWorldState.CurrentRegionName = CurrentRegion->GetRegionName();
 		CurrentWorldState.CurrentRegionPriority = CurrentRegion->GetPriority();
+
+		const FGameplayTag RegionTag = CurrentRegion->GetRegionTag();
+
+		if (RegionTag.IsValid())
+		{
+			CurrentWorldState.bHasCurrentRegionTag = true;
+			CurrentWorldState.CurrentRegionTag = RegionTag;
+			CurrentWorldState.WorldTags.AddTag(RegionTag);
+		}
 	}
 }
 
-void AAmbientDirector::SelectEncounterPoint()
+void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 {
 	SelectedEncounterPoint = nullptr;
+	SelectedEncounterDefinitionAsset = nullptr;
+	bHasSelectedEncounterDefinition = false;
+	SelectedEncounterDefinition = FAmbientEncounterDefinition();
+	SelectedEncounterScore = 0.0f;
+	SelectedEncounterReason = TEXT("No encounter definition selected");
+
+	CurrentWorldState.bHasSelectedEncounterDefinition = false;
+	CurrentWorldState.SelectedEncounterDefinitionId = NAME_None;
+	CurrentWorldState.SelectedEncounterDefinitionScore = 0.0f;
+	CurrentWorldState.SelectedEncounterDefinitionReason = TEXT("No encounter definition selected");
 
 	CurrentWorldState.bHasSelectedEncounterPoint = false;
 	CurrentWorldState.SelectedEncounterPointName = NAME_None;
 	CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
 	CurrentWorldState.SelectedEncounterPointReason = TEXT("No encounter point evaluated");
 
+	float BestScore = -TNumericLimits<float>::Max();
+	AAmbientEncounterPoint* BestPoint = nullptr;
+	const UAmbientEncounterDefinitionData* BestAsset = nullptr;
+	FAmbientEncounterDefinition BestDefinition;
+
+	auto EvaluateDefinition = [&](const UAmbientEncounterDefinitionData* DefinitionAsset, const FAmbientEncounterDefinition& Definition)
+	{
+		FAmbientEncounterSelectionDebugEntry DebugEntry;
+		AAmbientEncounterPoint* CandidatePoint = nullptr;
+
+		const bool bAccepted = EvaluateEncounterDefinitionCandidate(
+			Definition,
+			DebugEntry,
+			CandidatePoint
+		);
+
+		LastSelectionDebugEntries.Add(DebugEntry);
+
+		if (!bAccepted || !IsValid(CandidatePoint))
+		{
+			return;
+		}
+
+		if (DebugEntry.Score > BestScore)
+		{
+			BestScore = DebugEntry.Score;
+			BestPoint = CandidatePoint;
+			BestAsset = DefinitionAsset;
+			BestDefinition = Definition;
+		}
+	};
+
+	// 우선 방식:
+	// 여러 Encounter 정의 에셋을 후보로 평가
+	for (const TObjectPtr<UAmbientEncounterDefinitionData>& DefinitionAsset : EncounterDefinitionAssets)
+	{
+		if (!IsValid(DefinitionAsset))
+		{
+			FAmbientEncounterSelectionDebugEntry DebugEntry;
+			DebugEntry.bAccepted = false;
+			DebugEntry.EncounterId = NAME_None;
+			DebugEntry.Reason = TEXT("Null encounter definition asset in array");
+			LastSelectionDebugEntries.Add(DebugEntry);
+			continue;
+		}
+
+		EvaluateDefinition(DefinitionAsset.Get(), DefinitionAsset->Definition);
+	}
+
+	// 기존 단일 Encounter 정의 에셋 fallback
+	// 새 배열이 비어 있을 때만 사용
+	if (EncounterDefinitionAssets.Num() == 0 && IsValid(PrototypeEncounterDefinitionAsset))
+	{
+		EvaluateDefinition(PrototypeEncounterDefinitionAsset.Get(), PrototypeEncounterDefinitionAsset->Definition);
+	}
+
+	// 인라인 Encounter 정의값 fallback
+	// 설정된 에셋이 없을 때만 사용
+	if (EncounterDefinitionAssets.Num() == 0 && !IsValid(PrototypeEncounterDefinitionAsset))
+	{
+		EvaluateDefinition(nullptr, PrototypeEncounterDefinition);
+	}
+
+	if (!IsValid(BestPoint))
+	{
+		SelectedEncounterReason = TEXT("No accepted encounter definition candidate");
+
+		CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
+		CurrentWorldState.SelectedEncounterPointReason =
+			TEXT("No point selected because no definition candidate won");
+		return;
+	}
+
+	SelectedEncounterPoint = BestPoint;
+	SelectedEncounterDefinitionAsset = const_cast<UAmbientEncounterDefinitionData*>(BestAsset);
+	SelectedEncounterDefinition = BestDefinition;
+	bHasSelectedEncounterDefinition = true;
+	SelectedEncounterScore = BestScore;
+
+	SelectedEncounterReason = FString::Printf(
+		TEXT("Selected highest score candidate: %.1f"),
+		BestScore
+	);
+
+	CurrentWorldState.bHasSelectedEncounterDefinition = true;
+	CurrentWorldState.SelectedEncounterDefinitionId = BestDefinition.EncounterId;
+	CurrentWorldState.SelectedEncounterDefinitionScore = BestScore;
+	CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
+
+	CurrentWorldState.bHasSelectedEncounterPoint = true;
+	CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
+	CurrentWorldState.SelectedEncounterPointLocation = BestPoint->GetActorLocation();
+	CurrentWorldState.SelectedEncounterPointReason =
+		TEXT("Selected point from winning encounter definition");
+}
+
+bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
+	const FAmbientEncounterDefinition& Definition, 
+	FAmbientEncounterSelectionDebugEntry& OutDebugEntry, 
+	AAmbientEncounterPoint*& OutBestPoint
+) const
+{
+	OutBestPoint = nullptr;
+
+	OutDebugEntry.bAccepted = false;
+	OutDebugEntry.EncounterId = Definition.EncounterId;
+	OutDebugEntry.PointName = NAME_None;
+	OutDebugEntry.Score = 0.0f;
+	OutDebugEntry.DistanceToPoint = 0.0f;
+	OutDebugEntry.Reason = TEXT("Not evaluated");
+
+	FString WorldMatchReason;
+
+	if (!DoesEncounterDefinitionMatchCurrentWorld(Definition, WorldMatchReason))
+	{
+		OutDebugEntry.Reason = WorldMatchReason;
+		return false;
+	}
+
+	float DistanceToPoint = 0.0f;
+	FString PointReason;
+
+	AAmbientEncounterPoint* BestPoint = FindBestEncounterPointForDefinition(
+		Definition,
+		DistanceToPoint,
+		PointReason
+	);
+
+	if (!IsValid(BestPoint))
+	{
+		OutDebugEntry.Reason = PointReason;
+		return false;
+	}
+
+	const float MinDistance = MinimumSpawnDistance;
+	const float MaxDistance = FMath::Min(
+		Definition.EncounterPointSearchRadius,
+		MaximumSpawnDistance
+	);
+
+	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
+	const float DistanceAlpha = FMath::Clamp(
+		(DistanceToPoint - MinDistance) / DistanceRange,
+		0.0f,
+		1.0f
+	);
+
+	// 가까울수록 보너스
+	const float DistanceBonus = (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
+
+	const bool bRecentlyCompleted =
+		HasRecentlyFinishedEncounter(Definition.EncounterId);
+
+	// 최근에 했으면 마이너스
+	const float HistoryPenalty = bRecentlyCompleted
+		? Definition.RecentlyCompletedPenalty
+		: 0.0f;
+
+	const float FinalScore =
+		Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
+
+	OutBestPoint = BestPoint;
+
+	OutDebugEntry.bAccepted = true;
+	OutDebugEntry.PointName = BestPoint->GetPointName();
+	OutDebugEntry.Score = FinalScore;
+	OutDebugEntry.DistanceToPoint = DistanceToPoint;
+
+	OutDebugEntry.Reason = FString::Printf(
+		TEXT("Accepted | Base=%.1f DistanceBonus=%.1f HistoryPenalty=%.1f | %s"),
+		Definition.BaseSelectionScore,
+		DistanceBonus,
+		HistoryPenalty,
+		*PointReason
+	);
+
+	return true;
+}
+
+AAmbientEncounterPoint* AAmbientDirector::FindBestEncounterPointForDefinition(
+	const FAmbientEncounterDefinition& Definition, 
+	float& OutDistanceToPoint, 
+	FString& OutReason
+) const
+{
+	OutDistanceToPoint = 0.0f;
+	OutReason = TEXT("No point evaluated");
+
 	UWorld* World = GetWorld();
 
 	if (!World)
 	{
-		CurrentWorldState.SelectedEncounterPointReason = TEXT("No world");
-		return;
+		OutReason = TEXT("Rejected: no world");
+		return nullptr;
 	}
-
-	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
 
 	const float MinDistance = MinimumSpawnDistance;
 	const float MaxDistance = FMath::Min(
@@ -317,14 +529,19 @@ void AAmbientDirector::SelectEncounterPoint()
 
 	if (MaxDistance < MinDistance)
 	{
-		CurrentWorldState.SelectedEncounterPointReason = TEXT("Invalid distance settings: MaxDistance < MinDistance");
-		return;
+		OutReason = FString::Printf(
+			TEXT("Rejected: invalid distance range Min=%.0f Max=%.0f"),
+			MinDistance,
+			MaxDistance
+		);
+		return nullptr;
 	}
 
 	const float MinDistanceSq = FMath::Square(MinDistance);
 	const float MaxDistanceSq = FMath::Square(MaxDistance);
 
 	float BestDistanceSq = TNumericLimits<float>::Max();
+	AAmbientEncounterPoint* BestPoint = nullptr;
 
 	for (TActorIterator<AAmbientEncounterPoint> PointIt(World); PointIt; ++PointIt)
 	{
@@ -335,19 +552,9 @@ void AAmbientDirector::SelectEncounterPoint()
 			continue;
 		}
 
-		const FName PointRegionName = Point->GetRegionName();
-
-		if (PointRegionName != NAME_None)
+		if (!DoesEncounterPointMatchDefinition(Point, Definition))
 		{
-			if (!CurrentWorldState.bHasCurrentRegion)
-			{
-				continue;
-			}
-
-			if (PointRegionName != CurrentWorldState.CurrentRegionName)
-			{
-				continue;
-			}
+			continue;
 		}
 
 		const float DistanceSq = FVector::DistSquared2D(
@@ -363,27 +570,166 @@ void AAmbientDirector::SelectEncounterPoint()
 		if (DistanceSq < BestDistanceSq)
 		{
 			BestDistanceSq = DistanceSq;
-			SelectedEncounterPoint = Point;
+			BestPoint = Point;
 		}
 	}
 
-	if (IsValid(SelectedEncounterPoint))
+	if (!IsValid(BestPoint))
 	{
-		CurrentWorldState.bHasSelectedEncounterPoint = true;
-		CurrentWorldState.SelectedEncounterPointName = SelectedEncounterPoint->GetPointName();
-		CurrentWorldState.SelectedEncounterPointLocation = SelectedEncounterPoint->GetActorLocation();
-
-		CurrentWorldState.SelectedEncounterPointReason = FString::Printf(
-			TEXT("Selected nearest authored point within %.0f-%.0f cm"),
+		OutReason = FString::Printf(
+			TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"),
 			MinDistance,
 			MaxDistance
 		);
+		return nullptr;
 	}
-	else
+
+	OutDistanceToPoint = FMath::Sqrt(BestDistanceSq);
+
+	OutReason = FString::Printf(
+		TEXT("Point=%s Distance=%.0f cm"),
+		*BestPoint->GetPointName().ToString(),
+		OutDistanceToPoint
+	);
+
+	return BestPoint;
+}
+
+bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
+	const FAmbientEncounterDefinition& Definition, 
+	FString& OutReason
+) const
+{
+	if (!Definition.bEnabled)
 	{
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("No enabled authored point in current region and distance range");
+		OutReason = TEXT("Rejected: definition disabled");
+		return false;
 	}
+
+	if (!CurrentWorldState.bHasPlayerPawn)
+	{
+		OutReason = TEXT("Rejected: no player pawn");
+		return false;
+	}
+
+	if (Definition.RequiredRegionTag.IsValid())
+	{
+		if (!CurrentWorldState.WorldTags.HasTagExact(Definition.RequiredRegionTag))
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: missing required region tag %s"),
+				*Definition.RequiredRegionTag.ToString()
+			);
+			return false;
+		}
+	}
+	else if (Definition.RequiredRegionName != NAME_None)
+	{
+		if (!CurrentWorldState.bHasCurrentRegion)
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: requires region %s but player is in None"),
+				*Definition.RequiredRegionName.ToString()
+			);
+			return false;
+		}
+		if (CurrentWorldState.CurrentRegionName != Definition.RequiredRegionName)
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: requires region %s but player is in %s"),
+				*Definition.RequiredRegionName.ToString(),
+				*CurrentWorldState.CurrentRegionName.ToString()
+			);
+			return false;
+		}
+	}
+
+	if (!Definition.RequiredWorldTags.IsEmpty())
+	{
+		if (!CurrentWorldState.WorldTags.HasAllExact(Definition.RequiredWorldTags))
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: missing required world tags. Required=%s Current=%s"),
+				*Definition.RequiredWorldTags.ToStringSimple(),
+				*CurrentWorldState.WorldTags.ToStringSimple()
+			);
+			return false;
+		}
+	}
+
+	if (CurrentWorldState.PlayerSpeed2D > Definition.MaxPlayerSpeed)
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: player moving too fast %.0f > %.0f cm/s"),
+			CurrentWorldState.PlayerSpeed2D,
+			Definition.MaxPlayerSpeed
+		);
+		return false;
+	}
+
+	OutReason = TEXT("World conditions matched");
+	return true;
+}
+
+bool AAmbientDirector::DoesEncounterPointMatchDefinition(
+	const AAmbientEncounterPoint* Point, 
+	const FAmbientEncounterDefinition& Definition
+) const
+{
+	if (!IsValid(Point))
+	{
+		return false;
+	}
+
+	if (Definition.RequiredRegionTag.IsValid())
+	{
+		const FGameplayTag PointRegionTag = Point->GetRegionTag();
+
+		if (!PointRegionTag.IsValid())
+		{
+			return false;
+		}
+
+		if (!PointRegionTag.MatchesTagExact(Definition.RequiredRegionTag))
+		{
+			return false;
+		}
+	}
+	else if (Definition.RequiredRegionName != NAME_None)
+	{
+		if (Point->GetRegionName() != Definition.RequiredRegionName)
+		{
+			return false;
+		}
+	}
+
+	if (!Definition.RequiredPointTags.IsEmpty())
+	{
+		if (!Point->GetPointTags().HasAllExact(Definition.RequiredPointTags))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool AAmbientDirector::HasRecentlyFinishedEncounter(FName EncounterId) const
+{
+	if (EncounterId == NAME_None)
+	{
+		return false;
+	}
+
+	for (const FAmbientEncounterHistoryEntry& HistoryEntry : PrototypeEncounterHistory)
+	{
+		if (HistoryEntry.EncounterId == EncounterId)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void AAmbientDirector::EvaluatePrototypeEncounterCondition()
@@ -392,6 +738,13 @@ void AAmbientDirector::EvaluatePrototypeEncounterCondition()
 
 	CurrentWorldState.bPrototypeEncounterConditionMet = false;
 	CurrentWorldState.PrototypeEncounterBlockReason = TEXT("Prototype condition not evaluated");
+
+	if (!bHasSelectedEncounterDefinition && !bHasRuntimeEncounterDefinition)
+	{
+		CurrentWorldState.PrototypeEncounterBlockReason =
+			TEXT("No selected encounter definition");
+		return;
+	}
 
 	if (!Definition.bEnabled)
 	{
@@ -406,29 +759,7 @@ void AAmbientDirector::EvaluatePrototypeEncounterCondition()
 		return;
 	}
 
-	if (Definition.RequiredRegionName != NAME_None)
-	{
-		if (!CurrentWorldState.bHasCurrentRegion)
-		{
-			CurrentWorldState.PrototypeEncounterBlockReason = FString::Printf(
-				TEXT("Requires region %s but player is in None"),
-				*Definition.RequiredRegionName.ToString()
-			);
-			return;
-		}
-
-		if (CurrentWorldState.CurrentRegionName != Definition.RequiredRegionName)
-		{
-			CurrentWorldState.PrototypeEncounterBlockReason = FString::Printf(
-				TEXT("Requires region %s but player is in %s"),
-				*Definition.RequiredRegionName.ToString(),
-				*CurrentWorldState.CurrentRegionName.ToString()
-			);
-			return;
-		}
-	}
-
-	if (!CurrentWorldState.bHasSelectedEncounterPoint)
+	if (!CurrentWorldState.bHasSelectedEncounterPoint && !IsValid(ActivePrototypeEncounter))
 	{
 		CurrentWorldState.PrototypeEncounterBlockReason =
 			CurrentWorldState.SelectedEncounterPointReason;
@@ -491,16 +822,34 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 			if (Definition.RequiredRegionName != NAME_None)
 			{
-				const bool bWrongRegion =
-					!CurrentWorldState.bHasCurrentRegion ||
-					CurrentWorldState.CurrentRegionName != Definition.RequiredRegionName;
-
 				// 플레이어가 필수 Region을 벗어난 경우
 				// Waiting 중이던 Encounter 제거
+				bool bWrongRegion = false;
+
+				if (Definition.RequiredRegionTag.IsValid())
+				{
+					bWrongRegion =
+						!CurrentWorldState.WorldTags.HasTagExact(Definition.RequiredRegionTag);
+				}
+				else if (Definition.RequiredRegionName != NAME_None)
+				{
+					bWrongRegion =
+						!CurrentWorldState.bHasCurrentRegion ||
+						CurrentWorldState.CurrentRegionName != Definition.RequiredRegionName;
+				}
+
 				if (bWrongRegion)
 				{
 					DestroyPrototypeEncounter();
-					CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("Waiting encounter removed because player left required region");
+
+					RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+					bHasRuntimeEncounterDefinition = false;
+					RuntimeEncounterRegionName = NAME_None;
+					RuntimeEncounterPointName = NAME_None;
+					RuntimeEncounterStartedAtTimeSeconds = 0.0f;
+
+					CurrentWorldState.PrototypeEncounterRuntimeReason =
+						TEXT("Waiting encounter removed because player left required region");
 					return;
 				}
 			}
@@ -589,7 +938,12 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 		if (Remaining <= 0.0f)
 		{
 			PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-			CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("Cooldown complete; returning to Waiting");
+
+			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+			bHasRuntimeEncounterDefinition = false;
+
+			CurrentWorldState.PrototypeEncounterRuntimeReason =
+				TEXT("Cooldown complete; returning to Waiting");
 			break;
 		}
 
@@ -613,16 +967,38 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 const FAmbientEncounterDefinition& AAmbientDirector::GetPrototypeEncounterDefinition() const
 {
+	// Spawn 이후 상태에서는 Spawn 시점에 고정된 Runtime 정의값 사용
+	if (bHasRuntimeEncounterDefinition)
+	{
+		return RuntimeEncounterDefinition;
+	}
+
+	// 후보 평가 중에는 현재 선택된 Encounter 정의값 사용
+	if (bHasSelectedEncounterDefinition)
+	{
+		return SelectedEncounterDefinition;
+	}
+
+	// 기존 단일 Encounter 정의 에셋 fallback
 	if (IsValid(PrototypeEncounterDefinitionAsset))
 	{
 		return PrototypeEncounterDefinitionAsset->Definition;
 	}
 
+	// 최종 인라인 fallback 정의값
 	return PrototypeEncounterDefinition;
 }
 
 bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 {
+	if (!bHasSelectedEncounterDefinition && !bHasRuntimeEncounterDefinition)
+	{
+		CurrentWorldState.bPrototypeEncounterConditionMet = false;
+		CurrentWorldState.PrototypeEncounterBlockReason =
+			TEXT("No selected encounter definition");
+		return false;
+	}
+
 	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
 
 	if (!Definition.EncounterClass)
@@ -633,10 +1009,10 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		return false;
 	}
 
-	if (!IsValid(SelectedEncounterPoint))
+	if (!IsValid(SelectedEncounterPoint) && !IsValid(ActivePrototypeEncounter))
 	{
 		CurrentWorldState.bPrototypeEncounterConditionMet = false;
-		CurrentWorldState.PrototypeEncounterBlockReason = 
+		CurrentWorldState.PrototypeEncounterBlockReason =
 			TEXT("Selected encounter point is invalid");
 		return false;
 	}
@@ -650,16 +1026,27 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		return false;
 	}
 
-	const FTransform SpawnTransform = SelectedEncounterPoint->GetEncounterSpawnTransform();
 
 	if (!IsValid(ActivePrototypeEncounter))
 	{
+		if (!IsValid(SelectedEncounterPoint))
+		{
+			CurrentWorldState.PrototypeEncounterBlockReason =
+				TEXT("Cannot spawn because selected point is missing");
+			return false;
+		}
+
+		RuntimeEncounterDefinition = SelectedEncounterDefinition;
+		bHasRuntimeEncounterDefinition = true;
+
+		const FTransform SpawnTransform = SelectedEncounterPoint->GetEncounterSpawnTransform();
+
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.Owner = this;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 		ActivePrototypeEncounter = World->SpawnActor<AAmbientPlaceholderEncounter>(
-			Definition.EncounterClass,
+			RuntimeEncounterDefinition.EncounterClass,
 			SpawnTransform,
 			SpawnParams
 		);
@@ -674,13 +1061,16 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		RuntimeEncounterPointName  = CurrentWorldState.SelectedEncounterPointName;
 
 		ActivePrototypeEncounter->InitializePrototypeEncounter(
-			Definition.EncounterId,
+			RuntimeEncounterDefinition.EncounterId,
 			RuntimeEncounterRegionName,
 			RuntimeEncounterPointName
 		);
 	}
-	else
+	else if (IsValid(SelectedEncounterPoint))
 	{
+		const FTransform SpawnTransform =
+			SelectedEncounterPoint->GetEncounterSpawnTransform();
+
 		ActivePrototypeEncounter->SetActorTransform(SpawnTransform);
 	}
 
@@ -778,6 +1168,10 @@ void AAmbientDirector::StartPrototypeCooldown()
 	{
 		PrototypeCooldownEndTimeSeconds = 0.0f;
 		PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+
+		RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+		bHasRuntimeEncounterDefinition = false;
+
 		return;
 	}
 
@@ -1238,6 +1632,68 @@ void AAmbientDirector::PrintEncounterHistoryDebug() const
 	);
 
 	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+}
+
+void AAmbientDirector::PrintSelectionDebug() const
+{
+	if (!GEngine)
+	{
+		return;
+	}
+
+	FString WinnerString = TEXT("None");
+
+	if (bHasSelectedEncounterDefinition)
+	{
+		WinnerString = SelectedEncounterDefinition.EncounterId.ToString();
+	}
+
+	FString Message = FString::Printf(
+		TEXT("[AD] Selection | Candidates=%d | Winner=%s | Score=%.1f | Reason=%s"),
+		LastSelectionDebugEntries.Num(),
+		*WinnerString,
+		SelectedEncounterScore,
+		*SelectedEncounterReason
+	);
+
+	if (bHasSelectedEncounterDefinition)
+	{
+		for (const FAmbientEncounterSelectionDebugEntry& Entry : LastSelectionDebugEntries)
+		{
+			if (Entry.bAccepted && Entry.EncounterId == SelectedEncounterDefinition.EncounterId)
+			{
+				Message += FString::Printf(
+					TEXT(" | Detail=%s"),
+					*Entry.Reason
+				);
+				break;
+			}
+		}
+	}
+
+	GEngine->AddOnScreenDebugMessage(
+		1004,
+		UpdateInterval * 0.85f,
+		bHasSelectedEncounterDefinition ? FColor::Emerald : FColor::Red,
+		Message
+	);
+
+	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+
+	for (const FAmbientEncounterSelectionDebugEntry& Entry : LastSelectionDebugEntries)
+	{
+		const FString EntryMessage = FString::Printf(
+			TEXT("[AD] SelectionCandidate | Accepted=%s | Encounter=%s | Point=%s | Score=%.1f | Dist=%.0f | Reason=%s"),
+			Entry.bAccepted ? TEXT("true") : TEXT("false"),
+			*Entry.EncounterId.ToString(),
+			*Entry.PointName.ToString(),
+			Entry.Score,
+			Entry.DistanceToPoint,
+			*Entry.Reason
+		);
+
+		UE_LOG(LogTemp, Log, TEXT("%s"), *EntryMessage);
+	}
 }
 
 void AAmbientDirector::DrawCandidateDebug() const

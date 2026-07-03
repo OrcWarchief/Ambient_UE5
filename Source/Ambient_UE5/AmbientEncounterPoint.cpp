@@ -5,6 +5,7 @@
 
 #include "Components/ArrowComponent.h"
 #include "Components/SceneComponent.h"
+#include "GameplayTagContainer.h"
 
 AAmbientEncounterPoint::AAmbientEncounterPoint()
 {
@@ -16,4 +17,11 @@ AAmbientEncounterPoint::AAmbientEncounterPoint()
 	FacingArrow = CreateDefaultSubobject<UArrowComponent>(TEXT("FacingArrow"));
 	FacingArrow->SetupAttachment(SceneRoot);
 	FacingArrow->SetRelativeScale3D(FVector(2.0f, 2.0f, 2.0f));
+
+	RegionTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Region.Showroom"),
+		false
+	);
+
+	PointTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("Point.Showroom"), false));
 }
