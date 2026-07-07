@@ -16,6 +16,8 @@ class AAmbientEncounterPoint;
 class AAmbientPlaceholderEncounter;
 class UAmbientEncounterDefinitionData;
 
+struct FEnvQueryResult;
+
 UENUM(BlueprintType)
 enum class EAmbientEncounterRuntimeState : uint8
 {
@@ -127,6 +129,21 @@ struct FAmbientWorldState
 	bool bHasSelectedEncounterDefinition = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bHasSelectedEncounterLocation = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FVector SelectedEncounterLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FRotator SelectedEncounterRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString SelectedEncounterLocationSource = TEXT("None");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString SelectedEncounterLocationReason = TEXT("No encounter location selected");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FName SelectedEncounterDefinitionId = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
@@ -188,6 +205,15 @@ struct FAmbientEncounterSelectionDebugEntry
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
 	FString Reason = TEXT("Not evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FString LocationSource = TEXT("None");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FVector SelectedLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FString LocationReason = TEXT("No location evaluated");
 };
 
 UCLASS(Blueprintable)
@@ -221,6 +247,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawEncounterRuntimeDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	bool bDrawSelectedEncounterLocationDebug = true;
 
 	// ===== Debug Marker =====
 
@@ -295,7 +324,7 @@ protected:
 	TObjectPtr<AAmbientEncounterPoint> SelectedEncounterPoint = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Prototype")
-	TObjectPtr<AAmbientPlaceholderEncounter> ActivePrototypeEncounter = nullptr;
+	TObjectPtr<AActor> ActivePrototypeEncounter = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
 	TObjectPtr<UAmbientEncounterDefinitionData> SelectedEncounterDefinitionAsset = nullptr;
@@ -314,6 +343,15 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
 	TArray<FAmbientEncounterSelectionDebugEntry> LastSelectionDebugEntries;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FTransform SelectedEncounterSpawnTransform = FTransform::Identity;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	bool bHasSelectedEncounterSpawnTransform = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FString SelectedEncounterLocationReason = TEXT("No selected encounter spawn transform");
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	FAmbientEncounterDefinition RuntimeEncounterDefinition;
@@ -365,12 +403,37 @@ private:
 	bool EvaluateEncounterDefinitionCandidate(
 		const FAmbientEncounterDefinition& Definition,
 		FAmbientEncounterSelectionDebugEntry& OutDebugEntry,
-		AAmbientEncounterPoint*& OutBestPoint
+		AAmbientEncounterPoint*& OutBestPoint,
+		FTransform& OutSpawnTransform
 	) const;
 
-	AAmbientEncounterPoint* FindBestEncounterPointForDefinition(
+	bool FindSpawnTransformForDefinition(
 		const FAmbientEncounterDefinition& Definition,
+		FTransform& OutSpawnTransform,
+		AAmbientEncounterPoint*& OutBestPoint,
+		float& OutDistanceToLocation,
+		FString& OutReason
+	) const;
+
+	bool FindAuthoredPointSpawnTransformForDefinition(
+		const FAmbientEncounterDefinition& Definition,
+		FTransform& OutSpawnTransform,
+		AAmbientEncounterPoint*& OutBestPoint,
 		float& OutDistanceToPoint,
+		FString& OutReason
+	) const;
+
+	bool FindEQSSpawnTransformForDefinition(
+		const FAmbientEncounterDefinition& Definition,
+		FTransform& OutSpawnTransform,
+		float& OutDistanceToLocation,
+		FString& OutReason
+	) const;
+
+	bool ValidateEQSLocationCandidate(
+		const FVector& RawLocation,
+		const APawn* PlayerPawn,
+		FVector& OutValidatedLocation,
 		FString& OutReason
 	) const;
 
@@ -458,4 +521,5 @@ private:
 
 	void DrawEncounterRuntimeDebug() const;
 
+	void DrawSelectedEncounterLocationDebug() const;
 };

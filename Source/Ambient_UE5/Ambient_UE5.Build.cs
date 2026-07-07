@@ -16,6 +16,7 @@ public class Ambient_UE5 : ModuleRules
 			"EnhancedInput",
             "GameplayTags",
             "AIModule",
+            "GameplayTasks",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",

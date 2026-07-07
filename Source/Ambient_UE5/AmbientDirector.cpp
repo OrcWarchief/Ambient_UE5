@@ -6,6 +6,7 @@
 #include "AmbientCandidateMarker.h"
 #include "AmbientEncounterDefinitionData.h"
 #include "AmbientEncounterPoint.h"
+#include "AmbientEncounterRuntimeInterface.h"
 #include "AmbientPlaceholderEncounter.h"
 #include "AmbientRegionVolume.h"
 #include "CollisionQueryParams.h"
@@ -15,6 +16,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "EnvironmentQuery/EnvQuery.h"
+#include "EnvironmentQuery/EnvQueryManager.h"
+#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
@@ -67,10 +71,16 @@ void AAmbientDirector::UpdateWorldState()
 	CurrentRegion = nullptr;
 	SelectedEncounterPoint = nullptr;
 	SelectedEncounterDefinitionAsset = nullptr;
+
 	bHasSelectedEncounterDefinition = false;
+	SelectedEncounterDefinition = FAmbientEncounterDefinition();
 	SelectedEncounterScore = 0.0f;
 	SelectedEncounterReason = TEXT("No encounter selected");
 	LastSelectionDebugEntries.Reset();
+
+	bHasSelectedEncounterSpawnTransform = false;
+	SelectedEncounterSpawnTransform = FTransform::Identity;
+	SelectedEncounterLocationReason = TEXT("No selected encounter spawn transform");
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -121,6 +131,11 @@ void AAmbientDirector::UpdateWorldState()
 	if (bDrawEncounterPointDebug)
 	{
 		DrawEncounterPointDebug();
+	}
+
+	if (bDrawSelectedEncounterLocationDebug)
+	{
+		DrawSelectedEncounterLocationDebug();
 	}
 
 	if (bDrawEncounterRuntimeDebug)
@@ -310,10 +325,15 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 {
 	SelectedEncounterPoint = nullptr;
 	SelectedEncounterDefinitionAsset = nullptr;
+	
 	bHasSelectedEncounterDefinition = false;
 	SelectedEncounterDefinition = FAmbientEncounterDefinition();
 	SelectedEncounterScore = 0.0f;
 	SelectedEncounterReason = TEXT("No encounter definition selected");
+
+	bHasSelectedEncounterSpawnTransform = false;
+	SelectedEncounterSpawnTransform = FTransform::Identity;
+	SelectedEncounterLocationReason = TEXT("No selected encounter location");
 
 	CurrentWorldState.bHasSelectedEncounterDefinition = false;
 	CurrentWorldState.SelectedEncounterDefinitionId = NAME_None;
@@ -325,25 +345,35 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
 	CurrentWorldState.SelectedEncounterPointReason = TEXT("No encounter point evaluated");
 
+	CurrentWorldState.bHasSelectedEncounterLocation = false;
+	CurrentWorldState.SelectedEncounterLocation = FVector::ZeroVector;
+	CurrentWorldState.SelectedEncounterRotation = FRotator::ZeroRotator;
+	CurrentWorldState.SelectedEncounterLocationSource = TEXT("None");
+	CurrentWorldState.SelectedEncounterLocationReason = TEXT("No encounter location selected");
+
 	float BestScore = -TNumericLimits<float>::Max();
 	AAmbientEncounterPoint* BestPoint = nullptr;
 	const UAmbientEncounterDefinitionData* BestAsset = nullptr;
 	FAmbientEncounterDefinition BestDefinition;
+	FTransform BestSpawnTransform = FTransform::Identity;
+	FString BestLocationReason = TEXT("No location");
 
 	auto EvaluateDefinition = [&](const UAmbientEncounterDefinitionData* DefinitionAsset, const FAmbientEncounterDefinition& Definition)
 	{
 		FAmbientEncounterSelectionDebugEntry DebugEntry;
 		AAmbientEncounterPoint* CandidatePoint = nullptr;
+		FTransform CandidateSpawnTransform = FTransform::Identity;
 
 		const bool bAccepted = EvaluateEncounterDefinitionCandidate(
 			Definition,
 			DebugEntry,
-			CandidatePoint
+			CandidatePoint,
+			CandidateSpawnTransform
 		);
 
 		LastSelectionDebugEntries.Add(DebugEntry);
 
-		if (!bAccepted || !IsValid(CandidatePoint))
+		if (!bAccepted)
 		{
 			return;
 		}
@@ -354,6 +384,8 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 			BestPoint = CandidatePoint;
 			BestAsset = DefinitionAsset;
 			BestDefinition = Definition;
+			BestSpawnTransform = CandidateSpawnTransform;
+			BestLocationReason = DebugEntry.LocationReason;
 		}
 	};
 
@@ -367,6 +399,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 			DebugEntry.bAccepted = false;
 			DebugEntry.EncounterId = NAME_None;
 			DebugEntry.Reason = TEXT("Null encounter definition asset in array");
+			DebugEntry.LocationReason = TEXT("No asset");
 			LastSelectionDebugEntries.Add(DebugEntry);
 			continue;
 		}
@@ -388,13 +421,20 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 		EvaluateDefinition(nullptr, PrototypeEncounterDefinition);
 	}
 
-	if (!IsValid(BestPoint))
+	if (!BestLocationReason.IsEmpty())
+	{
+		SelectedEncounterLocationReason = BestLocationReason;
+	}
+
+	if (BestScore <= -TNumericLimits<float>::Max() * 0.5f)
 	{
 		SelectedEncounterReason = TEXT("No accepted encounter definition candidate");
 
 		CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
 		CurrentWorldState.SelectedEncounterPointReason =
 			TEXT("No point selected because no definition candidate won");
+		CurrentWorldState.SelectedEncounterLocationReason =
+			TEXT("No location selected because no definition candidate won");
 		return;
 	}
 
@@ -403,6 +443,8 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	SelectedEncounterDefinition = BestDefinition;
 	bHasSelectedEncounterDefinition = true;
 	SelectedEncounterScore = BestScore;
+	SelectedEncounterSpawnTransform = BestSpawnTransform;
+	bHasSelectedEncounterSpawnTransform = true;
 
 	SelectedEncounterReason = FString::Printf(
 		TEXT("Selected highest score candidate: %.1f"),
@@ -414,48 +456,82 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	CurrentWorldState.SelectedEncounterDefinitionScore = BestScore;
 	CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
 
-	CurrentWorldState.bHasSelectedEncounterPoint = true;
-	CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
-	CurrentWorldState.SelectedEncounterPointLocation = BestPoint->GetActorLocation();
-	CurrentWorldState.SelectedEncounterPointReason =
-		TEXT("Selected point from winning encounter definition");
+	if (IsValid(BestPoint))
+	{
+		CurrentWorldState.bHasSelectedEncounterPoint = true;
+		CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
+		CurrentWorldState.SelectedEncounterPointLocation = BestPoint->GetActorLocation();
+		CurrentWorldState.SelectedEncounterPointReason =
+			TEXT("Selected authored point from winning encounter definition");
+	}
+	else
+	{
+		CurrentWorldState.bHasSelectedEncounterPoint = false;
+		CurrentWorldState.SelectedEncounterPointName = NAME_None;
+		CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
+		CurrentWorldState.SelectedEncounterPointReason =
+			TEXT("Winning encounter used non-authored location source");
+	}
+
+	CurrentWorldState.bHasSelectedEncounterLocation = true;
+	CurrentWorldState.SelectedEncounterLocation =
+		BestSpawnTransform.GetLocation();
+	CurrentWorldState.SelectedEncounterRotation =
+		BestSpawnTransform.GetRotation().Rotator();
+
+	CurrentWorldState.SelectedEncounterLocationSource =
+		BestDefinition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
+		? TEXT("EQS")
+		: TEXT("AuthoredPoint");
+
+	CurrentWorldState.SelectedEncounterLocationReason = BestLocationReason;
 }
 
 bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
-	const FAmbientEncounterDefinition& Definition, 
-	FAmbientEncounterSelectionDebugEntry& OutDebugEntry, 
-	AAmbientEncounterPoint*& OutBestPoint
+	const FAmbientEncounterDefinition& Definition,
+	FAmbientEncounterSelectionDebugEntry& OutDebugEntry,
+	AAmbientEncounterPoint*& OutBestPoint,
+	FTransform& OutSpawnTransform
 ) const
 {
-	OutBestPoint = nullptr;
+	OutBestPoint		= nullptr;
+	OutSpawnTransform	= FTransform::Identity;
 
-	OutDebugEntry.bAccepted = false;
-	OutDebugEntry.EncounterId = Definition.EncounterId;
-	OutDebugEntry.PointName = NAME_None;
+	OutDebugEntry.bAccepted			= false;
+	OutDebugEntry.EncounterId		= Definition.EncounterId;
+	OutDebugEntry.PointName			= NAME_None;
 	OutDebugEntry.Score = 0.0f;
-	OutDebugEntry.DistanceToPoint = 0.0f;
-	OutDebugEntry.Reason = TEXT("Not evaluated");
+	OutDebugEntry.DistanceToPoint	= 0.0f;
+	OutDebugEntry.Reason			= TEXT("Not evaluated");
+	OutDebugEntry.LocationSource	=
+		Definition.LocationSource  == EAmbientEncounterLocationSource::EnvironmentQuery
+		? TEXT("EQS")
+		: TEXT("AuthoredPoint");
+	OutDebugEntry.SelectedLocation	= FVector::ZeroVector;
+	OutDebugEntry.LocationReason	= TEXT("No location evaluated");
 
 	FString WorldMatchReason;
 
 	if (!DoesEncounterDefinitionMatchCurrentWorld(Definition, WorldMatchReason))
 	{
 		OutDebugEntry.Reason = WorldMatchReason;
+		OutDebugEntry.LocationReason = TEXT("World conditions rejected before location search");
 		return false;
 	}
 
-	float DistanceToPoint = 0.0f;
-	FString PointReason;
+	float DistanceToLocation = 0.0f;
+	FString LocationReason;
 
-	AAmbientEncounterPoint* BestPoint = FindBestEncounterPointForDefinition(
+	if (!FindSpawnTransformForDefinition(
 		Definition,
-		DistanceToPoint,
-		PointReason
-	);
-
-	if (!IsValid(BestPoint))
+		OutSpawnTransform,
+		OutBestPoint,
+		DistanceToLocation,
+		LocationReason
+	))
 	{
-		OutDebugEntry.Reason = PointReason;
+		OutDebugEntry.Reason = LocationReason;
+		OutDebugEntry.LocationReason = LocationReason;
 		return false;
 	}
 
@@ -467,7 +543,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 
 	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
 	const float DistanceAlpha = FMath::Clamp(
-		(DistanceToPoint - MinDistance) / DistanceRange,
+		(DistanceToLocation - MinDistance) / DistanceRange,
 		0.0f,
 		1.0f
 	);
@@ -486,39 +562,86 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	const float FinalScore =
 		Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
 
-	OutBestPoint = BestPoint;
+	OutDebugEntry.bAccepted			= true;
+	OutDebugEntry.Score				= FinalScore;
+	OutDebugEntry.DistanceToPoint	= DistanceToLocation;
+	OutDebugEntry.SelectedLocation	= OutSpawnTransform.GetLocation();
+	OutDebugEntry.LocationReason	= LocationReason;
 
-	OutDebugEntry.bAccepted = true;
-	OutDebugEntry.PointName = BestPoint->GetPointName();
-	OutDebugEntry.Score = FinalScore;
-	OutDebugEntry.DistanceToPoint = DistanceToPoint;
+	if (IsValid(OutBestPoint))
+	{
+		OutDebugEntry.PointName = OutBestPoint->GetPointName();
+	}
 
 	OutDebugEntry.Reason = FString::Printf(
 		TEXT("Accepted | Base=%.1f DistanceBonus=%.1f HistoryPenalty=%.1f | %s"),
 		Definition.BaseSelectionScore,
 		DistanceBonus,
 		HistoryPenalty,
-		*PointReason
+		*LocationReason
 	);
+
 
 	return true;
 }
 
-AAmbientEncounterPoint* AAmbientDirector::FindBestEncounterPointForDefinition(
-	const FAmbientEncounterDefinition& Definition, 
-	float& OutDistanceToPoint, 
+bool AAmbientDirector::FindSpawnTransformForDefinition(
+	const FAmbientEncounterDefinition& Definition,
+	FTransform& OutSpawnTransform,
+	AAmbientEncounterPoint*& OutBestPoint,
+	float& OutDistanceToLocation,
 	FString& OutReason
 ) const
 {
-	OutDistanceToPoint = 0.0f;
-	OutReason = TEXT("No point evaluated");
+	OutSpawnTransform		= FTransform::Identity;
+	OutBestPoint			= nullptr;
+	OutDistanceToLocation	= 0.0f;
+	OutReason				= TEXT("No location source evaluated");
+
+	switch (Definition.LocationSource)
+	{
+	case EAmbientEncounterLocationSource::AuthoredPoint:
+		return FindAuthoredPointSpawnTransformForDefinition(
+			Definition,
+			OutSpawnTransform,
+			OutBestPoint,
+			OutDistanceToLocation,
+			OutReason
+		);
+
+	case EAmbientEncounterLocationSource::EnvironmentQuery:
+		return FindEQSSpawnTransformForDefinition(
+			Definition,
+			OutSpawnTransform,
+			OutDistanceToLocation,
+			OutReason
+		);
+
+	default:
+		OutReason = TEXT("Rejected: unknown encounter location source");
+		return false;
+	}
+}
+
+bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
+	const FAmbientEncounterDefinition& Definition,
+	FTransform& OutSpawnTransform,
+	AAmbientEncounterPoint*& OutBestPoint,
+	float& OutDistanceToPoint,
+	FString& OutReason
+) const
+{
+	OutSpawnTransform	= FTransform::Identity;
+	OutBestPoint		= nullptr;
+	OutDistanceToPoint	= 0.0f;
+	OutReason			= TEXT("No authored point evaluated");
 
 	UWorld* World = GetWorld();
 
 	if (!World)
 	{
 		OutReason = TEXT("Rejected: no world");
-		return nullptr;
+		return false;
 	}
 
 	const float MinDistance = MinimumSpawnDistance;
@@ -530,11 +653,11 @@ AAmbientEncounterPoint* AAmbientDirector::FindBestEncounterPointForDefinition(
 	if (MaxDistance < MinDistance)
 	{
 		OutReason = FString::Printf(
-			TEXT("Rejected: invalid distance range Min=%.0f Max=%.0f"),
+			TEXT("Rejected: invalid authored-point distance range Min=%.0f Max=%.0f"),
 			MinDistance,
 			MaxDistance
 		);
-		return nullptr;
+		return false;
 	}
 
 	const float MinDistanceSq = FMath::Square(MinDistance);
@@ -581,18 +704,214 @@ AAmbientEncounterPoint* AAmbientDirector::FindBestEncounterPointForDefinition(
 			MinDistance,
 			MaxDistance
 		);
-		return nullptr;
+		return false;
 	}
 
-	OutDistanceToPoint = FMath::Sqrt(BestDistanceSq);
+	OutBestPoint		= BestPoint;
+	OutDistanceToPoint	= FMath::Sqrt(BestDistanceSq);
+	OutSpawnTransform	= BestPoint->GetEncounterSpawnTransform();
 
 	OutReason = FString::Printf(
-		TEXT("Point=%s Distance=%.0f cm"),
+		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
 		*BestPoint->GetPointName().ToString(),
 		OutDistanceToPoint
 	);
 
-	return BestPoint;
+	return true;
+}
+
+bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
+	const FAmbientEncounterDefinition& Definition, 
+	FTransform& OutSpawnTransform, 
+	float& OutDistanceToLocation, 
+	FString& OutReason
+) const
+{
+	OutSpawnTransform = FTransform::Identity;
+	OutDistanceToLocation = 0.0f;
+	OutReason = TEXT("No EQS query evaluated");
+
+	if (!Definition.LocationQuery)
+	{
+		OutReason = TEXT("Rejected: no EQS query defined");
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		OutReason = TEXT("Rejected: no world for EQS Query");
+		return false;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+
+	if (!IsValid(PlayerPawn))
+	{
+		OutReason = TEXT("Rejected: no player pawn for EQS Query");
+		return false;
+	}
+
+	UEnvQueryManager* QueryManager = UEnvQueryManager::GetCurrent(World);
+
+	if (!QueryManager)
+	{
+		OutReason = TEXT("Rejected: no EQS QueryManager");
+		return false;
+	}
+	
+	FEnvQueryRequest QueryRequest(Definition.LocationQuery, PlayerPawn);
+
+	const TSharedPtr<FEnvQueryResult> QueryResult =
+		QueryManager->RunInstantQuery(
+			QueryRequest,
+			Definition.EQSRunMode.GetValue()
+		);
+
+	if (!QueryResult.IsValid())
+	{
+		OutReason = TEXT("Rejected: EQS returned invalid result object");
+		return false;
+	}
+
+	if (!QueryResult->IsSuccessful() || QueryResult->Items.Num() == 0)
+	{
+		OutReason = TEXT("Rejected: EQS query did not return a successful location result");
+		return false;
+	}
+
+	const FVector RawEQSLocation = QueryResult->GetItemAsLocation(0);
+
+	FVector FinalLocation = RawEQSLocation;
+	FString ValidationReason = TEXT("EQS location accepted without Director Validation");
+
+	if (Definition.bValidateEQSLocationWithDirectorRules)
+	{
+		if (!ValidateEQSLocationCandidate(RawEQSLocation, PlayerPawn, FinalLocation, ValidationReason))
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: EQS location failed Director validation | Reason=%s"),
+				*ValidationReason
+			);
+			return false;
+		}
+	}
+
+	FVector ToPlayer = CurrentWorldState.PlayerLocation - FinalLocation;
+	ToPlayer.Z = 0.0f;
+
+	const FRotator SpawnRotation =
+		ToPlayer.IsNearlyZero()
+		? FRotator::ZeroRotator
+		: ToPlayer.Rotation();
+
+	OutSpawnTransform = FTransform(SpawnRotation, FinalLocation, FVector::OneVector);
+	OutDistanceToLocation = FVector::Dist2D(CurrentWorldState.PlayerLocation, FinalLocation);
+
+	OutReason = FString::Printf(
+		TEXT("EQS accepted | Raw=(X=%.0f Y=%.0f Z=%.0f) Final=(X=%.0f Y=%.0f Z=%.0f) Distance=%.0f cm | %s"),
+		RawEQSLocation.X,
+		RawEQSLocation.Y,
+		RawEQSLocation.Z,
+		FinalLocation.X,
+		FinalLocation.Y,
+		FinalLocation.Z,
+		OutDistanceToLocation,
+		*ValidationReason
+	);
+
+	return true;
+}
+
+bool AAmbientDirector::ValidateEQSLocationCandidate(
+	const FVector& RawLocation, 
+	const APawn* PlayerPawn, 
+	FVector& OutValidatedLocation, 
+	FString& OutReason
+) const
+{
+	OutValidatedLocation = RawLocation;
+	OutReason = TEXT("EQS location not validated");
+
+	if (!IsValid(PlayerPawn))
+	{
+		OutReason = TEXT("No player pawn");
+		return false;
+	}
+
+	FVector GroundLocation = FVector::ZeroVector;
+	FHitResult GroundHit;
+
+	if (!ProjectPointToGround(RawLocation, PlayerPawn, GroundLocation, GroundHit))
+	{
+		OutReason = TEXT("No ground found under EQS location");
+		return false;
+	}
+
+	if (GroundHit.ImpactNormal.Z < MinimumGroundNormalZ)
+	{
+		OutReason = FString::Printf(
+			TEXT("Ground too steep under EQS location: NormalZ=%.2f"),
+			GroundHit.ImpactNormal.Z
+		);
+		return false;
+	}
+
+	const float Distance2D = FVector::Dist2D(
+		CurrentWorldState.PlayerLocation, 
+		GroundLocation
+	);
+
+	if (Distance2D < MinimumSpawnDistance)
+	{
+		OutReason = FString::Printf(
+			TEXT("EQS location too close: Dist=%.0f Min=%.0f"),
+			Distance2D,
+			MinimumSpawnDistance
+		);
+		return false;
+	}
+
+	if (Distance2D > MaximumSpawnDistance)
+	{
+		OutReason = FString::Printf(
+			TEXT("EQS location too far: Dist=%.0f Max=%.0f"),
+			Distance2D,
+			MaximumSpawnDistance
+		);
+		return false;
+	}
+
+	FHitResult PathBlockHit;
+
+	if (IsPathToCandidateBlocked(PlayerPawn, GroundLocation, PathBlockHit))
+	{
+		OutReason = FString::Printf(
+			TEXT("Blocked path to EQS location: %s"),
+			*GetNameSafe(PathBlockHit.GetActor())
+		);
+		return false;
+	}
+
+	FHitResult AreaBlockHit;
+
+	if (IsCandidateAreaBlocked(PlayerPawn, GroundLocation, AreaBlockHit))
+	{
+		OutReason = FString::Printf(
+			TEXT("EQS location area occupied: %s"),
+			*GetNameSafe(AreaBlockHit.GetActor())
+		);
+		return false;
+	}
+
+	OutValidatedLocation = GroundLocation;
+
+	OutReason = FString::Printf(
+		TEXT("Director validation passed | Grounded=true Dist=%.0f"),
+		Distance2D
+	);
+
+	return true;
 }
 
 bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
@@ -1009,11 +1328,23 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		return false;
 	}
 
-	if (!IsValid(SelectedEncounterPoint) && !IsValid(ActivePrototypeEncounter))
+	if (!Definition.EncounterClass->ImplementsInterface(
+		UAmbientEncounterRuntimeInterface::StaticClass()
+	))
+	{
+		CurrentWorldState.bPrototypeEncounterConditionMet = false;
+		CurrentWorldState.PrototypeEncounterBlockReason = FString::Printf(
+			TEXT("EncounterClass %s does not implement AmbientEncounterRuntimeInterface"),
+			*GetNameSafe(Definition.EncounterClass.Get())
+		);
+		return false;
+	}
+
+	if (!bHasSelectedEncounterSpawnTransform && !IsValid(ActivePrototypeEncounter))
 	{
 		CurrentWorldState.bPrototypeEncounterConditionMet = false;
 		CurrentWorldState.PrototypeEncounterBlockReason =
-			TEXT("Selected encounter point is invalid");
+			TEXT("Selected encounter spawn transform is invalid");
 		return false;
 	}
 
@@ -1029,23 +1360,23 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 
 	if (!IsValid(ActivePrototypeEncounter))
 	{
-		if (!IsValid(SelectedEncounterPoint))
+		if (!bHasSelectedEncounterSpawnTransform)
 		{
 			CurrentWorldState.PrototypeEncounterBlockReason =
-				TEXT("Cannot spawn because selected point is missing");
+				TEXT("Cannot spawn because selected spawn transform is missing");
 			return false;
 		}
 
 		RuntimeEncounterDefinition = SelectedEncounterDefinition;
 		bHasRuntimeEncounterDefinition = true;
 
-		const FTransform SpawnTransform = SelectedEncounterPoint->GetEncounterSpawnTransform();
+		const FTransform SpawnTransform = SelectedEncounterSpawnTransform;
 
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.Owner = this;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-		ActivePrototypeEncounter = World->SpawnActor<AAmbientPlaceholderEncounter>(
+		ActivePrototypeEncounter = World->SpawnActor<AActor>(
 			RuntimeEncounterDefinition.EncounterClass,
 			SpawnTransform,
 			SpawnParams
@@ -1058,20 +1389,32 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		}
 
 		RuntimeEncounterRegionName = CurrentWorldState.CurrentRegionName;
-		RuntimeEncounterPointName  = CurrentWorldState.SelectedEncounterPointName;
+		RuntimeEncounterPointName  = IsValid(SelectedEncounterPoint)
+			? SelectedEncounterPoint->GetPointName()
+			: FName(TEXT("Location.EQS"));
 
-		ActivePrototypeEncounter->InitializePrototypeEncounter(
-			RuntimeEncounterDefinition.EncounterId,
-			RuntimeEncounterRegionName,
-			RuntimeEncounterPointName
+		FAmbientEncounterRuntimeContext RuntimeContext;
+		RuntimeContext.DirectorActor		= this;
+		RuntimeContext.EncounterId			= RuntimeEncounterDefinition.EncounterId;
+		RuntimeContext.RegionName			= RuntimeEncounterRegionName;
+		RuntimeContext.SourcePointName		= RuntimeEncounterPointName;
+		RuntimeContext.SpawnLocation		= SpawnTransform.GetLocation();
+		RuntimeContext.StartedAtTimeSeconds = CurrentWorldState.GameTimeSeconds;
+		RuntimeContext.EncounterTags		= RuntimeEncounterDefinition.EncounterTags;
+
+		IAmbientEncounterRuntimeInterface::Execute_InitializeAmbientEncounter(
+			ActivePrototypeEncounter,
+			RuntimeContext
+		);
+
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterWaiting(
+			ActivePrototypeEncounter
 		);
 	}
-	else if (IsValid(SelectedEncounterPoint))
+	else if (bHasSelectedEncounterSpawnTransform && IsValid(SelectedEncounterPoint))
 	{
-		const FTransform SpawnTransform =
-			SelectedEncounterPoint->GetEncounterSpawnTransform();
-
-		ActivePrototypeEncounter->SetActorTransform(SpawnTransform);
+		// EQS Encounter는 스폰 뒤 위치 이동 X, Point가 있는 Authored 방식일 때만 위치 이동 
+		ActivePrototypeEncounter->SetActorTransform(SelectedEncounterSpawnTransform);
 	}
 
 	return IsValid(ActivePrototypeEncounter);
@@ -1101,6 +1444,15 @@ void AAmbientDirector::StartPrototypeEncounter()
 
 	PrototypeEncounterStartCount++;
 
+	if (ActivePrototypeEncounter->GetClass()->ImplementsInterface(
+		UAmbientEncounterRuntimeInterface::StaticClass()
+	))
+	{
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterActivated(
+			ActivePrototypeEncounter
+		);
+	}
+
 	CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("Player is involved in encounter");
 }
 
@@ -1116,6 +1468,17 @@ void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)
 	PrototypeEncounterState = EAmbientEncounterRuntimeState::Cleanup;
 
 	PendingPrototypeFinishReason = Reason;
+
+	if (IsValid(ActivePrototypeEncounter) &&
+		ActivePrototypeEncounter->GetClass()->ImplementsInterface(
+			UAmbientEncounterRuntimeInterface::StaticClass()
+		))
+	{
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterCleanup(
+			ActivePrototypeEncounter,
+			Reason
+		);
+	}
 
 	const float Now = CurrentWorldState.GameTimeSeconds;
 	const float SafeCleanupDelay = FMath::Max(0.0f, Definition.CleanupDelaySeconds);
@@ -1137,6 +1500,17 @@ void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)
 void AAmbientDirector::FinishPrototypeEncounter(const FString& Reason)
 {
 	const float FinishTime = CurrentWorldState.GameTimeSeconds;
+
+	if (IsValid(ActivePrototypeEncounter) &&
+		ActivePrototypeEncounter->GetClass()->ImplementsInterface(
+			UAmbientEncounterRuntimeInterface::StaticClass()
+		))
+	{
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterFinished(
+			ActivePrototypeEncounter,
+			Reason
+		);
+	}
 
 	AddPrototypeHistoryEntry(FinishTime, Reason);
 
@@ -1648,11 +2022,17 @@ void AAmbientDirector::PrintSelectionDebug() const
 		WinnerString = SelectedEncounterDefinition.EncounterId.ToString();
 	}
 
+	const FString LocationSourceString =
+		CurrentWorldState.bHasSelectedEncounterLocation
+		? CurrentWorldState.SelectedEncounterLocationSource
+		: TEXT("None");
+
 	FString Message = FString::Printf(
-		TEXT("[AD] Selection | Candidates=%d | Winner=%s | Score=%.1f | Reason=%s"),
+		TEXT("[AD] Selection | Candidates=%d | Winner=%s | Score=%.1f | Location=%s | Reason=%s"),
 		LastSelectionDebugEntries.Num(),
 		*WinnerString,
 		SelectedEncounterScore,
+		*LocationSourceString,
 		*SelectedEncounterReason
 	);
 
@@ -1683,13 +2063,18 @@ void AAmbientDirector::PrintSelectionDebug() const
 	for (const FAmbientEncounterSelectionDebugEntry& Entry : LastSelectionDebugEntries)
 	{
 		const FString EntryMessage = FString::Printf(
-			TEXT("[AD] SelectionCandidate | Accepted=%s | Encounter=%s | Point=%s | Score=%.1f | Dist=%.0f | Reason=%s"),
+			TEXT("[AD] SelectionCandidate | Accepted=%s | Encounter=%s | Point=%s | LocationSource=%s | Score=%.1f | Dist=%.0f | Location=(X=%.0f Y=%.0f Z=%.0f) | Reason=%s | LocationReason=%s"),
 			Entry.bAccepted ? TEXT("true") : TEXT("false"),
 			*Entry.EncounterId.ToString(),
 			*Entry.PointName.ToString(),
+			*Entry.LocationSource,
 			Entry.Score,
 			Entry.DistanceToPoint,
-			*Entry.Reason
+			Entry.SelectedLocation.X,
+			Entry.SelectedLocation.Y,
+			Entry.SelectedLocation.Z,
+			*Entry.Reason,
+			*Entry.LocationReason
 		);
 
 		UE_LOG(LogTemp, Log, TEXT("%s"), *EntryMessage);
@@ -2003,6 +2388,75 @@ void AAmbientDirector::DrawEncounterRuntimeDebug() const
 		Label,
 		nullptr,
 		StateColor,
+		DebugLifeTime,
+		true
+	);
+}
+
+void AAmbientDirector::DrawSelectedEncounterLocationDebug() const
+{
+	if (!bHasSelectedEncounterSpawnTransform)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+
+	if (!World)
+	{
+		return;
+	}
+
+	const float DebugLifeTime = FMath::Max(0.05f, UpdateInterval * 0.9f);
+
+	const FVector Location =
+		SelectedEncounterSpawnTransform.GetLocation();
+
+	const bool bIsEQS =
+		CurrentWorldState.SelectedEncounterLocationSource == TEXT("EQS");
+
+	const FColor LocationColor =
+		bIsEQS ? FColor::Purple : FColor::Cyan;
+
+	const FVector MarkerLocation =
+		Location + FVector::UpVector * 100.0f;
+
+	DrawDebugSphere(
+		World,
+		MarkerLocation,
+		90.0f,
+		20,
+		LocationColor,
+		false,
+		DebugLifeTime,
+		0,
+		3.0f
+	);
+
+	DrawDebugDirectionalArrow(
+		World,
+		MarkerLocation,
+		MarkerLocation + SelectedEncounterSpawnTransform.GetRotation().GetForwardVector() * 220.0f,
+		60.0f,
+		LocationColor,
+		false,
+		DebugLifeTime,
+		0,
+		3.0f
+	);
+
+	const FString Label = FString::Printf(
+		TEXT("Selected Location: %s\n%s"),
+		*CurrentWorldState.SelectedEncounterLocationSource,
+		*CurrentWorldState.SelectedEncounterLocationReason
+	);
+
+	DrawDebugString(
+		World,
+		MarkerLocation + FVector::UpVector * 130.0f,
+		Label,
+		nullptr,
+		LocationColor,
 		DebugLifeTime,
 		true
 	);

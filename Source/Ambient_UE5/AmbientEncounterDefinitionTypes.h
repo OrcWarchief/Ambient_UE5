@@ -1,11 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "GameplayTagContainer.h"
 #include "Templates/SubclassOf.h"
 #include "AmbientEncounterDefinitionTypes.generated.h"
 
-class AAmbientPlaceholderEncounter;
+class AActor;
+class UEnvQuery;
+
+UENUM(BlueprintType)
+enum class EAmbientEncounterLocationSource : uint8
+{
+	AuthoredPoint UMETA(DisplayName = "Authored Point"),
+	EnvironmentQuery UMETA(DisplayName = "Environment Query")
+};
 
 USTRUCT(BlueprintType)
 struct FAmbientEncounterDefinition
@@ -47,6 +56,21 @@ struct FAmbientEncounterDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Tags", meta = (Categories = "Point"))
 	FGameplayTagContainer RequiredPointTags;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location")
+	EAmbientEncounterLocationSource LocationSource = EAmbientEncounterLocationSource::AuthoredPoint;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
+		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
+	TObjectPtr<UEnvQuery> LocationQuery = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
+		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
+	TEnumAsByte<EEnvQueryRunMode::Type> EQSRunMode = EEnvQueryRunMode::SingleResult;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
+		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
+	bool bValidateEQSLocationWithDirectorRules = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection", meta = (ClampMin = "0.0"))
 	float BaseSelectionScore = 100.0f;
 
@@ -75,5 +99,5 @@ struct FAmbientEncounterDefinition
 	float CooldownDurationSeconds = 10.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition")
-	TSubclassOf<AAmbientPlaceholderEncounter> EncounterClass;
+	TSubclassOf<AActor> EncounterClass;
 };
