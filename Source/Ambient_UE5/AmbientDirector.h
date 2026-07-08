@@ -15,7 +15,8 @@ class AAmbientRegionVolume;
 class AAmbientEncounterPoint;
 class AAmbientPlaceholderEncounter;
 class UAmbientEncounterDefinitionData;
-
+class UAmbientDirectorSaveGame;
+struct FAmbientDirectorSaveSnapshot;
 struct FEnvQueryResult;
 
 UENUM(BlueprintType)
@@ -25,6 +26,16 @@ enum class EAmbientEncounterRuntimeState : uint8
 	Active UMETA(DisplayName = "Active"),
 	Cleanup UMETA(DisplayName = "Cleanup"),
 	Cooldown UMETA(DisplayName = "Cooldown")
+};
+
+UENUM(BlueprintType)
+enum class EAmbientDirectorDebugVisualizationMode : uint8
+{
+	Off UMETA(DisplayName = "Off"),
+	Placement UMETA(DisplayName = "Placement"),
+	Selection UMETA(DisplayName = "Selection"),
+	Runtime UMETA(DisplayName = "Runtime"),
+	Full UMETA(DisplayName = "Full")
 };
 
 USTRUCT(BlueprintType)
@@ -40,6 +51,12 @@ struct FAmbientEncounterHistoryEntry
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
 	FName SourcePointName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FVector EncounterLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
+	FString LocationSource = TEXT("Unknown");
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|History")
 	float StartedAtTimeSeconds = 0.0f;
@@ -181,6 +198,24 @@ struct FAmbientWorldState
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	int32 PrototypeEncounterFinishCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	bool bPacingAllowsNewEncounter = true;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	FString PacingBlockReason = TEXT("Pacing not evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	int32 CurrentEncounterBudgetUse = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	int32 MaxEncounterBudget = 1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float GlobalPacingRemaining = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
+	float NearestRecentEncounterDistance = 0.0f;
 };
 
 USTRUCT(BlueprintType) // debug only data
@@ -229,12 +264,31 @@ protected:
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Ambient Director|Save")
+	void SaveDirectorStateToSlot();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Ambient Director|Save")
+	void LoadDirectorStateFromSlot();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Ambient Director|Save")
+	void ClearDirectorSaveSlot();
+
 	// ===== Debug Properties =====
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	float UpdateInterval = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bPrintDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	bool bPrintCompactDebugDashboard = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	bool bPrintDetailedDebugLines = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
+	EAmbientDirectorDebugVisualizationMode DebugVisualizationMode =
+		EAmbientDirectorDebugVisualizationMode::Full;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawCandidateDebug = true;
@@ -310,6 +364,25 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime", meta = (ClampMin = "1"))
 	int32 MaxHistoryEntries = 8;
+
+	// ===== Encounter Pacing =====
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	bool bEnableDirectorPacing = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing", meta = (ClampMin = "0"))
+	int32 MaxSimultaneousPrototypeEncounters = 1;
+	
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	float LastAnyEncounterStartTimeSeconds = -999999.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing", meta = (ClampMin = "0.0", Units = "s"))
+	float MinimumSecondsBetweenEncounterStarts = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing", meta = (ClampMin = "0.0", Units = "cm"))
+	float MinimumDistanceFromRecentEncounterLocations = 700.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	bool bUseRecentEncounterSpacing = true;
 
 
 	// ===== World State =====
@@ -389,6 +462,28 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	FString PendingPrototypeFinishReason = TEXT("None");
 
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FVector RuntimeEncounterLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	FString RuntimeEncounterLocationSource = TEXT("Unknown");
+
+	// ===== Save System =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Save")
+	bool bAutoLoadDirectorSaveOnBeginPlay = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Save")
+	bool bAutoSaveDirectorStateOnRuntimeChange = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Save")
+	bool bPrintSaveDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Save")
+	FString DirectorSaveSlotName = TEXT("AmbientDirector_Debug");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Save")
+	int32 DirectorSaveUserIndex = 0;
 
 private:
 	UFUNCTION()
@@ -405,7 +500,7 @@ private:
 		FAmbientEncounterSelectionDebugEntry& OutDebugEntry,
 		AAmbientEncounterPoint*& OutBestPoint,
 		FTransform& OutSpawnTransform
-	) const;
+	);
 
 	bool FindSpawnTransformForDefinition(
 		const FAmbientEncounterDefinition& Definition,
@@ -446,6 +541,25 @@ private:
 		const AAmbientEncounterPoint* Point,
 		const FAmbientEncounterDefinition& Definition
 	) const;
+
+	bool DoesCandidatePassDirectorPacing(
+		const FTransform& CandidateSpawnTransform,
+		FString& OutReason,
+		float& OutGlobalPacingRemaining,
+		float& OutNearestHistoryDistance
+	) const;
+
+	int32 GetCurrentEncounterBudgetUse() const;
+
+	float GetGlobalPacingRemaining() const;
+
+	float GetNearestRecentEncounterDistance(const FVector& CandidateLocation) const;
+
+	bool ShouldDrawPlacementDebug() const;
+
+	bool ShouldDrawSelectionDebug() const;
+
+	bool ShouldDrawRuntimeDebug() const;
 
 	bool HasRecentlyFinishedEncounter(FName EncounterId) const;
 
@@ -504,6 +618,39 @@ private:
 
 	FTimerHandle WorldStateTimerHandle;
 
+	// ===== Save Game =====
+
+	bool SaveDirectorStateInternal(FString& OutReason) const;
+
+	bool LoadDirectorStateInternal(FString& OutReason);
+
+	bool ClearDirectorSaveInternal(FString& OutReason) const;
+
+	void BuildDirectorSaveSnapshot(
+		FAmbientDirectorSaveSnapshot& OutSnapshot
+	) const;
+
+	bool ApplyDirectorSaveSnapshot(
+		const FAmbientDirectorSaveSnapshot& Snapshot,
+		FString& OutReason
+	);
+
+	bool RestoreRuntimeEncounterFromSave(
+		const FAmbientDirectorSaveSnapshot& Snapshot,
+		const FAmbientEncounterDefinition& RestoredDefinition,
+		FString& OutReason
+	);
+
+	bool TryFindEncounterDefinitionById(
+		FName EncounterId,
+		FAmbientEncounterDefinition& OutDefinition
+	) const;
+
+	void PrintSaveDebugMessage(
+		const FString& Message,
+		bool bSuccess
+	) const;
+
 	// ===== Debug Properties =====
 	void PrintWorldStateDebug() const;
 
@@ -512,6 +659,8 @@ private:
 	void PrintEncounterHistoryDebug() const;
 
 	void PrintSelectionDebug() const;
+
+	void PrintDirectorDashboardDebug() const;
 
 	void DrawCandidateDebug() const;
 
