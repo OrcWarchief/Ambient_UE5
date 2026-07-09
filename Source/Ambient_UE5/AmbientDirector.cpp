@@ -1,8 +1,7 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 
 #include "AmbientDirector.h"
 
+#include "Ambient_UE5.h"
 #include "AmbientCandidateMarker.h"
 #include "AmbientDirectorSaveGame.h"
 #include "AmbientEncounterDefinitionData.h"
@@ -423,7 +422,8 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	CurrentWorldState.SelectedEncounterLocationSource = TEXT("None");
 	CurrentWorldState.SelectedEncounterLocationReason = TEXT("No encounter location selected");
 
-	float BestScore = -999999.0f;
+	bool bFoundBestCandidate = false;
+	float BestScore = 0.0f;
 	AAmbientEncounterPoint* BestPoint = nullptr;
 	const UAmbientEncounterDefinitionData* BestAsset = nullptr;
 	FAmbientEncounterDefinition BestDefinition;
@@ -450,14 +450,15 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 			return;
 		}
 
-		if (DebugEntry.Score > BestScore)
+		if (!bFoundBestCandidate || DebugEntry.Score > BestScore)
 		{
-			BestScore = DebugEntry.Score;
-			BestPoint = CandidatePoint;
-			BestAsset = DefinitionAsset;
-			BestDefinition = Definition;
-			BestSpawnTransform = CandidateSpawnTransform;
-			BestLocationReason = DebugEntry.LocationReason;
+			bFoundBestCandidate = true;
+			BestScore			= DebugEntry.Score;
+			BestPoint			= CandidatePoint;
+			BestAsset			= DefinitionAsset;
+			BestDefinition		= Definition;
+			BestSpawnTransform	= CandidateSpawnTransform;
+			BestLocationReason	= DebugEntry.LocationReason;
 		}
 	};
 
@@ -498,7 +499,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 		SelectedEncounterLocationReason = BestLocationReason;
 	}
 
-	if (BestScore <= -999999.0f * 0.5f)
+	if (!bFoundBestCandidate)
 	{
 		SelectedEncounterReason = TEXT("No accepted encounter definition candidate");
 
@@ -1202,7 +1203,7 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 int32 AAmbientDirector::GetCurrentEncounterBudgetUse() const
 {
 	return IsValid(ActivePrototypeEncounter) ? 1 : 0;
-	// TODO: 여러 Encounter 확장 지원
+	// TODO: 여러 Encounter 확장 지원? 현재는 1개만 지원
 }
 
 float AAmbientDirector::GetGlobalPacingRemaining() const
@@ -2035,7 +2036,7 @@ void AAmbientDirector::UpdateCandidateMarker()
 	}
 
 	const FVector  MarkerLocation = CurrentWorldState.CandidateLocation;
-	const FRotator MakrerRotation = FRotator::ZeroRotator;
+	const FRotator MarkerRotation = FRotator::ZeroRotator;
 
 	if (!IsValid(ActiveCandidateMarker))
 	{
@@ -2046,14 +2047,14 @@ void AAmbientDirector::UpdateCandidateMarker()
 		ActiveCandidateMarker = World->SpawnActor<AAmbientCandidateMarker>(
 			CandidateMarkerClass,
 			MarkerLocation,
-			MakrerRotation,
+			MarkerRotation,
 			SpawnParams
 		);
 	}
 	else
 	{
 		ActiveCandidateMarker->SetActorLocation(MarkerLocation);
-		ActiveCandidateMarker->SetActorRotation(MakrerRotation);
+		ActiveCandidateMarker->SetActorRotation(MarkerRotation);
 	}
 
 	if (IsValid(ActiveCandidateMarker))
@@ -2583,7 +2584,7 @@ void AAmbientDirector::PrintSaveDebugMessage(const FString& Message, bool bSucce
 		*Message
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *FullMessage);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *FullMessage);
 
 	if (GEngine)
 	{
@@ -2677,7 +2678,7 @@ void AAmbientDirector::PrintWorldStateDebug() const
 		Message
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Message);
 }
 
 void AAmbientDirector::PrintEncounterDebug() const
@@ -2750,7 +2751,7 @@ void AAmbientDirector::PrintEncounterDebug() const
 		Message
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Message);
 }
 
 void AAmbientDirector::PrintEncounterHistoryDebug() const
@@ -2790,7 +2791,7 @@ void AAmbientDirector::PrintEncounterHistoryDebug() const
 		Message
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Message);
 }
 
 void AAmbientDirector::PrintSelectionDebug() const
@@ -2843,7 +2844,7 @@ void AAmbientDirector::PrintSelectionDebug() const
 		Message
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Message);
 
 	for (const FAmbientEncounterSelectionDebugEntry& Entry : LastSelectionDebugEntries)
 	{
@@ -2862,7 +2863,7 @@ void AAmbientDirector::PrintSelectionDebug() const
 			*Entry.LocationReason
 		);
 
-		UE_LOG(LogTemp, Log, TEXT("%s"), *EntryMessage);
+		UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *EntryMessage);
 	}
 }
 
@@ -2985,7 +2986,7 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 		Dashboard
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("%s"), *Dashboard);
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Dashboard);
 }
 
 void AAmbientDirector::DrawCandidateDebug() const
