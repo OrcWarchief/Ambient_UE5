@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
-#include "AmbientDirector.h"
+#include "AmbientDirectorTypes.h"
 #include "AmbientDirectorSaveGame.generated.h"
 
 USTRUCT(BlueprintType)
