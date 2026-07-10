@@ -782,3 +782,65 @@ void AAmbientDirector::DrawSelectedEncounterLocationDebug() const
 		true
 	);
 }
+
+void AAmbientDirector::UpdateCandidateMarker()
+{
+	const bool bShouldShowMarker =
+		bUseVisibleCandidateMarker &&
+		CurrentWorldState.bHasCandidateLocation &&
+		CurrentWorldState.bCandidateValid;
+
+	if (!bShouldShowMarker)
+	{
+		DestroyCandidateMarker();
+		return;
+	}
+
+	if (!CandidateMarkerClass)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FVector  MarkerLocation = CurrentWorldState.CandidateLocation;
+	const FRotator MarkerRotation = FRotator::ZeroRotator;
+
+	if (!IsValid(ActiveCandidateMarker))
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		ActiveCandidateMarker = World->SpawnActor<AAmbientCandidateMarker>(
+			CandidateMarkerClass,
+			MarkerLocation,
+			MarkerRotation,
+			SpawnParams
+		);
+	}
+	else
+	{
+		ActiveCandidateMarker->SetActorLocation(MarkerLocation);
+		ActiveCandidateMarker->SetActorRotation(MarkerRotation);
+	}
+
+	if (IsValid(ActiveCandidateMarker))
+	{
+		ActiveCandidateMarker->SetMarkerActive(true);
+	}
+}
+
+void AAmbientDirector::DestroyCandidateMarker()
+{
+	if (IsValid(ActiveCandidateMarker))
+	{
+		ActiveCandidateMarker->Destroy();
+	}
+
+	ActiveCandidateMarker = nullptr;
+}
