@@ -548,3 +548,28 @@ bool AAmbientDirector::TryFindEncounterDefinitionById(
 
 	return false;
 }
+
+void AAmbientDirector::PrintSaveDebugMessage(const FString& Message, bool bSuccess) const
+{
+	if (!bPrintSaveDebug)
+	{
+		return;
+	}
+
+	const FString FullMessage = FString::Printf(
+		TEXT("[AD Save] %s"),
+		*Message
+	);
+
+	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *FullMessage);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			1006,
+			2.5f,
+			bSuccess ? FColor::Green : FColor::Red,
+			FullMessage
+		);
+	}
+}

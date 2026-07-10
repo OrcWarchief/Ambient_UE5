@@ -1,6 +1,8 @@
 #include "AmbientDirector.h"
 
 #include "AmbientEncounterPoint.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "EnvironmentQuery/EnvQuery.h"
@@ -380,4 +382,223 @@ bool AAmbientDirector::DoesEncounterPointMatchDefinition(
 	}
 
 	return true;
+}
+
+void AAmbientDirector::UpdateCandidateLocation(const APawn* PlayerPawn)
+{
+	if (!IsValid(PlayerPawn))
+	{
+		RejectCandidate(TEXT("No player pawn"));
+		return;
+	}
+
+	if (MaximumSpawnDistance < MinimumSpawnDistance)
+	{
+		RejectCandidate(TEXT("Invalid distance settings: MaximumSpawnDistance is smaller than MinimumSpawnDistance"));
+		return;
+	}
+
+	CurrentWorldState.RequestedCandidateDistance = CandidateDistance;
+	CurrentWorldState.UsedCandidateDistance = FMath::Clamp(
+		CandidateDistance,
+		MinimumSpawnDistance,
+		MaximumSpawnDistance
+	);
+
+	FVector CandidateDirection = PlayerPawn->GetActorForwardVector(); // TODO: 전방을 콘앵글 씌우고 랜덤한 값으로 변경...?
+	CandidateDirection.Z = 0.0f;
+	CandidateDirection = CandidateDirection.GetSafeNormal();
+
+	if (CandidateDirection.IsNearlyZero())
+	{
+		CandidateDirection = FVector::ForwardVector;
+	}
+
+	CurrentWorldState.RawCandidateLocation = CurrentWorldState.PlayerLocation + CandidateDirection * CurrentWorldState.UsedCandidateDistance;
+	CurrentWorldState.CandidateLocation = CurrentWorldState.RawCandidateLocation;
+	CurrentWorldState.bHasCandidateLocation = true;
+
+	FVector GroundLocation = FVector::ZeroVector;
+	FHitResult GroundHit;
+
+	if (!ProjectPointToGround(CurrentWorldState.RawCandidateLocation, PlayerPawn, GroundLocation, GroundHit))
+	{
+		RejectCandidate(TEXT("No ground found under candidate"));
+		return;
+	}
+
+	if (GroundHit.ImpactNormal.Z < MinimumGroundNormalZ)
+	{
+		const FString Reason = FString::Printf(
+			TEXT("Ground too steep: NormalZ=%.2f"),
+			GroundHit.ImpactNormal.Z
+		);
+
+		RejectCandidate(Reason);
+		return;
+	}
+
+	CurrentWorldState.CandidateLocation = GroundLocation;
+	CurrentWorldState.bCandidateProjectedToGround = true;
+	CurrentWorldState.CandidateDistance2D = FVector::Dist2D(CurrentWorldState.PlayerLocation, CurrentWorldState.CandidateLocation);
+
+	if (CurrentWorldState.CandidateDistance2D < MinimumSpawnDistance)
+	{
+		const FString Reason = FString::Printf(
+			TEXT("Too close: Dist=%.0f Min=%.0f"),
+			CurrentWorldState.CandidateDistance2D,
+			MinimumSpawnDistance
+		);
+
+		RejectCandidate(Reason);
+		return;
+	}
+
+	if (CurrentWorldState.CandidateDistance2D > MaximumSpawnDistance)
+	{
+		const FString Reason = FString::Printf(
+			TEXT("Too far: Dist=%.0f Max=%.0f"),
+			CurrentWorldState.CandidateDistance2D,
+			MaximumSpawnDistance
+		);
+
+		RejectCandidate(Reason);
+		return;
+	}
+
+	FHitResult PathBlockHit;
+
+	if (IsPathToCandidateBlocked(PlayerPawn, CurrentWorldState.CandidateLocation, PathBlockHit))
+	{
+		const FString Reason = FString::Printf(
+			TEXT("Blocked path: %s"),
+			*GetNameSafe(PathBlockHit.GetActor())
+		);
+
+		RejectCandidate(Reason);
+		return;
+	}
+
+	FHitResult AreaBlockHit;
+
+	if (IsCandidateAreaBlocked(PlayerPawn, CurrentWorldState.CandidateLocation, AreaBlockHit))
+	{
+		const FString Reason = FString::Printf(
+			TEXT("Candidate area occupied: %s"),
+			*GetNameSafe(AreaBlockHit.GetActor())
+		);
+
+		RejectCandidate(Reason);
+		return;
+	}
+
+	AcceptCandidate();
+}
+
+bool AAmbientDirector::ProjectPointToGround(const FVector& Point, const APawn* PlayerPawn, FVector& OutGroundLocation, FHitResult& OutGroundHit) const
+{
+	UWorld* World = GetWorld();
+
+	if (!World)
+	{
+		return false;
+	}
+
+	const FVector TraceStart = Point + FVector::UpVector * GroundTraceUpDistance;
+	const FVector TraceEnd = Point - FVector::UpVector * GroundTraceDownDistance;
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.AddIgnoredActor(PlayerPawn);
+
+	const bool bHitGround = World->LineTraceSingleByChannel(
+		OutGroundHit,
+		TraceStart,
+		TraceEnd,
+		ECC_Visibility,
+		QueryParams
+	);
+
+	if (!bHitGround || !OutGroundHit.bBlockingHit)
+	{
+		return false;
+	}
+
+	OutGroundLocation = OutGroundHit.ImpactPoint;
+	return true;
+}
+
+bool AAmbientDirector::IsPathToCandidateBlocked(const APawn* PlayerPawn, const FVector& GroundLocation, FHitResult& OutBlockHit) const
+{
+	UWorld* World = GetWorld();
+
+	if (!World || !IsValid(PlayerPawn))
+	{
+		return false;
+	}
+
+	const FVector TraceStart = CurrentWorldState.PlayerLocation;
+	const FVector TraceEnd = GroundLocation + FVector::UpVector * ObstructionCheckHeight;
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.AddIgnoredActor(PlayerPawn);
+
+	const bool bBlocked = World->LineTraceSingleByChannel(
+		OutBlockHit,
+		TraceStart,
+		TraceEnd,
+		ECC_Visibility,
+		QueryParams
+	);
+
+	return bBlocked && OutBlockHit.bBlockingHit;
+}
+
+bool AAmbientDirector::IsCandidateAreaBlocked(const APawn* PlayerPawn, const FVector& GroundLocation, FHitResult& OutBlockHit) const
+{
+	UWorld* World = GetWorld();
+
+	if (!World)
+	{
+		return false;
+	}
+
+	const FVector SweepStart = GroundLocation + FVector::UpVector * (CandidateClearanceRadius + 5.0f);
+
+	const FVector SweepEnd = SweepStart + FVector::UpVector * 1.0f;
+
+	const FCollisionShape SweepShape = FCollisionShape::MakeSphere(CandidateClearanceRadius);
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.bFindInitialOverlaps = true;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.AddIgnoredActor(PlayerPawn);
+
+	const bool bBlocked = World->SweepSingleByChannel(
+		OutBlockHit,
+		SweepStart,
+		SweepEnd,
+		FQuat::Identity,
+		ECC_Visibility,
+		SweepShape,
+		QueryParams
+	);
+
+	return bBlocked && OutBlockHit.bBlockingHit;
+}
+
+void AAmbientDirector::RejectCandidate(const FString& Reason)
+{
+	CurrentWorldState.bCandidateValid = false;
+	CurrentWorldState.CandidateRejectReason = Reason;
+}
+
+void AAmbientDirector::AcceptCandidate()
+{
+	CurrentWorldState.bCandidateValid = true;
+	CurrentWorldState.CandidateRejectReason = TEXT("Accepted");
 }
