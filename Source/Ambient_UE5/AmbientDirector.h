@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "GameFramework/Actor.h"
 #include "Templates/SubclassOf.h"
 #include "AmbientEncounterDefinitionTypes.h"
@@ -14,11 +13,8 @@ class APawn;
 class AAmbientCandidateMarker;
 class AAmbientRegionVolume;
 class AAmbientEncounterPoint;
-class AAmbientPlaceholderEncounter;
 class UAmbientEncounterDefinitionData;
-class UAmbientDirectorSaveGame;
 struct FAmbientDirectorSaveSnapshot;
-struct FEnvQueryResult;
 
 UCLASS(Blueprintable)
 class AMBIENT_UE5_API AAmbientDirector : public AActor
