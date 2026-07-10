@@ -1,9 +1,7 @@
 
 #include "AmbientDirector.h"
 
-#include "Ambient_UE5.h"
 #include "AmbientCandidateMarker.h"
-#include "AmbientDirectorSaveGame.h"
 #include "AmbientEncounterDefinitionData.h"
 #include "AmbientEncounterPoint.h"
 #include "AmbientEncounterRuntimeInterface.h"
@@ -11,7 +9,6 @@
 #include "AmbientRegionVolume.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "EnvironmentQuery/EnvQuery.h"
@@ -2028,29 +2025,4 @@ void AAmbientDirector::DestroyCandidateMarker()
 	}
 
 	ActiveCandidateMarker = nullptr;
-}
-
-void AAmbientDirector::PrintSaveDebugMessage(const FString& Message, bool bSuccess) const
-{
-	if (!bPrintSaveDebug)
-	{
-		return;
-	}
-
-	const FString FullMessage = FString::Printf(
-		TEXT("[AD Save] %s"),
-		*Message
-	);
-
-	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *FullMessage);
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			1006,
-			2.5f,
-			bSuccess ? FColor::Green : FColor::Red,
-			FullMessage
-		);
-	}
 }
