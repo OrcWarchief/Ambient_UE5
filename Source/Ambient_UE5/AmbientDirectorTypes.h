@@ -54,6 +54,13 @@ struct FAmbientEncounterHistoryEntry
 	FString FinishReason = TEXT("None");
 };
 
+UENUM(BlueprintType)
+enum class EAmbientTraversalState : uint8
+{
+	OnFoot UMETA(DisplayName = "On Foot"),
+	Mounted UMETA(DisplayName = "Mounted")
+};
+
 USTRUCT(BlueprintType)
 struct FAmbientWorldState
 {
@@ -202,6 +209,15 @@ struct FAmbientWorldState
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	float NearestRecentEncounterDistance = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
+	EAmbientTraversalState TraversalState = EAmbientTraversalState::OnFoot;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
+	bool bIsMounted = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
+	TObjectPtr<AActor> TraversalActor = nullptr;
 };
 
 USTRUCT(BlueprintType) // debug only data
