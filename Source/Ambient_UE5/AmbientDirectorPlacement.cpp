@@ -495,7 +495,12 @@ void AAmbientDirector::UpdateCandidateLocation(const APawn* PlayerPawn)
 	AcceptCandidate();
 }
 
-bool AAmbientDirector::ProjectPointToGround(const FVector& Point, const APawn* PlayerPawn, FVector& OutGroundLocation, FHitResult& OutGroundHit) const
+bool AAmbientDirector::ProjectPointToGround(
+	const FVector& Point, 
+	const APawn* PlayerPawn, 
+	FVector& OutGroundLocation, 
+	FHitResult& OutGroundHit
+) const
 {
 	UWorld* World = GetWorld();
 
@@ -529,7 +534,11 @@ bool AAmbientDirector::ProjectPointToGround(const FVector& Point, const APawn* P
 	return true;
 }
 
-bool AAmbientDirector::IsPathToCandidateBlocked(const APawn* PlayerPawn, const FVector& GroundLocation, FHitResult& OutBlockHit) const
+bool AAmbientDirector::IsPathToCandidateBlocked(
+	const APawn* PlayerPawn, 
+	const FVector& GroundLocation, 
+	FHitResult& OutBlockHit
+) const
 {
 	UWorld* World = GetWorld();
 

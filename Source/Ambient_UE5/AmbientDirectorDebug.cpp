@@ -302,6 +302,9 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 		? CurrentWorldState.CurrentRegionName.ToString()
 		: TEXT("None");
 
+	const FString TraversalString =
+		GetTraversalStateString(CurrentWorldState.TraversalState);
+
 	const FString SelectionString =
 		bHasSelectedEncounterDefinition
 		? SelectedEncounterDefinition.EncounterId.ToString()
@@ -341,7 +344,7 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 
 	const FString Dashboard = FString::Printf(
 		TEXT("[AD DASHBOARD]\n")
-		TEXT("State=%s | Def=%s | Region=%s | Location=%s | Actor=%s\n")
+		TEXT("State=%s | Def=%s | Region=%s | Traversal=%s | Speed=%.0f cm/s | Location=%s | Actor=%s\n")
 		TEXT("Selection=%s | Score=%.1f | Candidates=%d\n")
 		TEXT("Pacing=%s | Budget=%d/%d | StartGap=%.1fs | RecentDist=%.0f\n")
 		TEXT("Runtime=Dist=%.0f | Cleanup=%.1fs | Cooldown=%.1fs\n")
@@ -350,6 +353,8 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 		*StateString,
 		*DefinitionIdString,
 		*RegionString,
+		*TraversalString,
+		CurrentWorldState.PlayerSpeed2D,
 		*LocationSourceString,
 		*ActorString,
 

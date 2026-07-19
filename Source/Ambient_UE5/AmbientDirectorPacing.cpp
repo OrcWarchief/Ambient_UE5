@@ -5,7 +5,7 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 	FString& OutReason,
 	float& OutGlobalPacingRemaining,
 	float& OutNearestHistoryDistance
-)const
+) const
 {
 	OutReason = TEXT("Pacing passed");
 	OutGlobalPacingRemaining = 0.0f;

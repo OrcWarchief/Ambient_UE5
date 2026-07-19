@@ -24,6 +24,19 @@ class AMBIENT_UE5_API AAmbientDirector : public AActor
 public:
 	AAmbientDirector();
 
+	UFUNCTION(BlueprintCallable, Category = "Ambient Director|Traversal")
+	void SetTraversalState(EAmbientTraversalState NewTraversalState, AActor* NewTraversalActor);
+
+	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
+	EAmbientTraversalState GetTraversalState() const { return TraversalState; }
+
+	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
+	bool IsPlayerMounted() const { return TraversalState == EAmbientTraversalState::Mounted; }
+
+	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
+	AActor* GetTraversalActor() const { return TraversalActor.Get(); }
+
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -149,6 +162,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Pacing")
 	bool bUseRecentEncounterSpacing = true;
 
+	// ===== Traversal State =====
+	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ambient Director|Traversal")
+	EAmbientTraversalState TraversalState = EAmbientTraversalState::OnFoot;
+
+	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ambient Director|Traversal")
+	TObjectPtr<AActor> TraversalActor = nullptr;
 
 	// ===== World State =====
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
@@ -382,6 +401,14 @@ private:
 	void DestroyCandidateMarker();
 
 	FTimerHandle WorldStateTimerHandle;
+
+	void SyncTraversalWorldState();
+
+	bool DoesDefinitionMatchTraversal(const FAmbientEncounterDefinition& Definition, FString& OutReason) const;
+
+	static FString GetTraversalStateString(EAmbientTraversalState State);
+
+	static FGameplayTag GetTraversalGameplayTag(EAmbientTraversalState State);
 
 	// ===== Save Game =====
 

@@ -7,13 +7,8 @@
 #include "AmbientEncounterRuntimeInterface.h"
 #include "AmbientPlaceholderEncounter.h"
 #include "AmbientRegionVolume.h"
-#include "CollisionQueryParams.h"
-#include "CollisionShape.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "EnvironmentQuery/EnvQuery.h"
-#include "EnvironmentQuery/EnvQueryManager.h"
-#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
@@ -25,6 +20,48 @@ AAmbientDirector::AAmbientDirector()
 
 	CandidateMarkerClass = AAmbientCandidateMarker::StaticClass();
 	PrototypeEncounterDefinition.EncounterClass = AAmbientPlaceholderEncounter::StaticClass();
+}
+
+void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalState, AActor* NewTraversalActor)
+{
+	AActor* SanitizedTraversalActor = 
+		NewTraversalState == EAmbientTraversalState::Mounted 
+		? NewTraversalActor 
+		: nullptr;
+
+	const bool bStateUnchanged = 
+		TraversalState == NewTraversalState && 
+		TraversalActor.Get() == SanitizedTraversalActor;
+
+	if (bStateUnchanged)
+	{
+		return;
+	}
+
+	TraversalState = NewTraversalState;
+	TraversalActor = SanitizedTraversalActor;
+
+	SyncTraversalWorldState();
+
+	if (PrototypeEncounterState == 
+			EAmbientEncounterRuntimeState::Waiting &&
+		bHasRuntimeEncounterDefinition)
+	{
+		FString TraversalMatchReason;
+
+		if (!DoesDefinitionMatchTraversal(RuntimeEncounterDefinition, TraversalMatchReason))
+		{
+			DestroyPrototypeEncounter();
+
+			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+			bHasRuntimeEncounterDefinition = false;
+		}
+	}
+
+	if (HasActorBegunPlay())
+	{
+		UpdateWorldState();
+	}
 }
 
 void AAmbientDirector::BeginPlay()
@@ -67,27 +104,29 @@ void AAmbientDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AAmbientDirector::UpdateWorldState()
 {
-	CurrentWorldState = FAmbientWorldState();
-	CurrentWorldState.CurrentEncounterBudgetUse = GetCurrentEncounterBudgetUse();
-	CurrentWorldState.MaxEncounterBudget = MaxSimultaneousPrototypeEncounters;
-	CurrentWorldState.GlobalPacingRemaining = GetGlobalPacingRemaining();
-	CurrentWorldState.NearestRecentEncounterDistance = 0.0f;
-	CurrentWorldState.bPacingAllowsNewEncounter = true;
-	CurrentWorldState.PacingBlockReason = TEXT("Pacing not evaluated");
+	CurrentWorldState									= FAmbientWorldState();
+	CurrentWorldState.CurrentEncounterBudgetUse			= GetCurrentEncounterBudgetUse();
+	CurrentWorldState.MaxEncounterBudget				= MaxSimultaneousPrototypeEncounters;
+	CurrentWorldState.GlobalPacingRemaining				= GetGlobalPacingRemaining();
+	CurrentWorldState.NearestRecentEncounterDistance	= 0.0f;
+	CurrentWorldState.bPacingAllowsNewEncounter			= true;
+	CurrentWorldState.PacingBlockReason					= TEXT("Pacing not evaluated");
 
-	CurrentRegion = nullptr;
-	SelectedEncounterPoint = nullptr;
-	SelectedEncounterDefinitionAsset = nullptr;
+	SyncTraversalWorldState();
 
-	bHasSelectedEncounterDefinition = false;
-	SelectedEncounterDefinition = FAmbientEncounterDefinition();
-	SelectedEncounterScore = 0.0f;
-	SelectedEncounterReason = TEXT("No encounter selected");
+	CurrentRegion						= nullptr;
+	SelectedEncounterPoint				= nullptr;
+	SelectedEncounterDefinitionAsset	= nullptr;
+
+	bHasSelectedEncounterDefinition		= false;
+	SelectedEncounterDefinition			= FAmbientEncounterDefinition();
+	SelectedEncounterScore				= 0.0f;
+	SelectedEncounterReason				= TEXT("No encounter selected");
 	LastSelectionDebugEntries.Reset();
 
 	bHasSelectedEncounterSpawnTransform = false;
-	SelectedEncounterSpawnTransform = FTransform::Identity;
-	SelectedEncounterLocationReason = TEXT("No selected encounter spawn transform");
+	SelectedEncounterSpawnTransform		= FTransform::Identity;
+	SelectedEncounterLocationReason		= TEXT("No selected encounter spawn transform");
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -117,8 +156,8 @@ void AAmbientDirector::UpdateWorldState()
 	}
 	else
 	{
-		CurrentWorldState.PrototypeEncounterBlockReason = TEXT("No player pawn");
-		CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("No player pawn");
+		CurrentWorldState.PrototypeEncounterBlockReason		= TEXT("No player pawn");
+		CurrentWorldState.PrototypeEncounterRuntimeReason	= TEXT("No player pawn");
 	}
 
 	UpdateCandidateMarker();
@@ -871,5 +910,94 @@ FString AAmbientDirector::GetPrototypeRuntimeStateString() const
 
 	default:
 		return TEXT("Unknown");
+	}
+}
+
+
+void AAmbientDirector::SyncTraversalWorldState()
+{
+	CurrentWorldState.TraversalState = TraversalState;
+	CurrentWorldState.bIsMounted = TraversalState == EAmbientTraversalState::Mounted;
+
+	CurrentWorldState.TraversalActor =
+		IsValid(TraversalActor.Get())
+		? TraversalActor.Get()
+		: nullptr;
+
+	const FGameplayTag OnFootTag = GetTraversalGameplayTag(EAmbientTraversalState::OnFoot);
+	const FGameplayTag MountedTag = GetTraversalGameplayTag(EAmbientTraversalState::Mounted);
+
+	if (OnFootTag.IsValid())
+	{
+		CurrentWorldState.WorldTags.RemoveTag(OnFootTag);
+	}
+
+	if (MountedTag.IsValid())
+	{
+		CurrentWorldState.WorldTags.RemoveTag(MountedTag);
+	}
+
+	const FGameplayTag CurrentTraversalTag = GetTraversalGameplayTag(TraversalState);
+
+	if (CurrentTraversalTag.IsValid())
+	{
+		CurrentWorldState.WorldTags.AddTag(CurrentTraversalTag);
+	}
+}
+
+bool AAmbientDirector::DoesDefinitionMatchTraversal(const FAmbientEncounterDefinition& Definition, FString& OutReason) const
+{
+	const FGameplayTag OnFootTag = GetTraversalGameplayTag(EAmbientTraversalState::OnFoot);
+	const FGameplayTag MountedTag = GetTraversalGameplayTag(EAmbientTraversalState::Mounted);
+
+	if (OnFootTag.IsValid() &&
+		Definition.RequiredWorldTags.HasTagExact(OnFootTag) &&
+		TraversalState != EAmbientTraversalState::OnFoot)
+	{
+		OutReason = TEXT("Requires Traversal.OnFoot");
+
+		return false;
+	}
+
+	if (MountedTag.IsValid() &&
+		Definition.RequiredWorldTags.HasTagExact(MountedTag) &&
+		TraversalState != EAmbientTraversalState::Mounted)
+	{
+		OutReason = TEXT("Requires Traversal.Mounted");
+
+		return false;
+	}
+
+	OutReason = TEXT("Traversal requirement matched");
+	return true;
+}
+
+FString AAmbientDirector::GetTraversalStateString(EAmbientTraversalState State)
+{
+	switch (State)
+	{
+	case EAmbientTraversalState::OnFoot:
+		return TEXT("OnFoot");
+
+	case EAmbientTraversalState::Mounted:
+		return TEXT("Mounted");
+
+	default:
+		return TEXT("Unknown");
+	}
+}
+
+FGameplayTag AAmbientDirector::GetTraversalGameplayTag(EAmbientTraversalState State)
+{
+	switch (State)
+	{
+	case EAmbientTraversalState::OnFoot:
+		return FGameplayTag::RequestGameplayTag(FName(TEXT("Traversal.OnFoot")), false);
+
+	case EAmbientTraversalState::Mounted:
+		return FGameplayTag::RequestGameplayTag(FName(TEXT("Traversal.Mounted")), false);
+
+	default:
+		return FGameplayTag();
 	}
 }
