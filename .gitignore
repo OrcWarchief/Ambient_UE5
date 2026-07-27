@@ -17,3 +17,6 @@ Saved/
 # OS
 .DS_Store
 Thumbs.db
+
+# Licensed Fab content; installed locally and not redistributed
+Content/HorseStarterKit/
