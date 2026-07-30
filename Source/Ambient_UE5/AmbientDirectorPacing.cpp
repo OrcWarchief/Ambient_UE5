@@ -1,6 +1,7 @@
 #include "AmbientDirector.h"
 
 bool AAmbientDirector::DoesCandidatePassDirectorPacing(
+	const FAmbientEncounterDefinition& Definition,
 	const FTransform& CandidateSpawnTransform,
 	FString& OutReason,
 	float& OutGlobalPacingRemaining,
@@ -41,23 +42,39 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 		return false;
 	}
 
-	const FVector CandidateLocation = CandidateSpawnTransform.GetLocation();
-	OutNearestHistoryDistance = GetNearestRecentEncounterDistance(CandidateLocation);
+	const bool bShouldApplyRecentLocationSpacing =
+		bUseRecentEncounterSpacing &&
+		Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery;
 
-	if (bUseRecentEncounterSpacing &&
-		MinimumDistanceFromRecentEncounterLocations > 0.0f &&
-		PrototypeEncounterHistory.Num() > 0 &&
-		OutNearestHistoryDistance < MinimumDistanceFromRecentEncounterLocations)
+	if (bShouldApplyRecentLocationSpacing)
 	{
-		OutReason = FString::Printf(
-			TEXT("Rejected: too close to recent encounter %.0f < %.0f cm"),
-			OutNearestHistoryDistance,
-			MinimumDistanceFromRecentEncounterLocations
-		);
-		return false;
+		const FVector CandidateLocation = CandidateSpawnTransform.GetLocation();
+
+		OutNearestHistoryDistance = GetNearestRecentEncounterDistance(CandidateLocation);
+
+		if (
+			MinimumDistanceFromRecentEncounterLocations > 0.0f &&
+			OutNearestHistoryDistance < MinimumDistanceFromRecentEncounterLocations
+			)
+		{
+			OutReason = FString::Printf(
+				TEXT("Rejected: EQS location too close to recent EQS encounter %.0f < %.0f cm"),
+				OutNearestHistoryDistance,
+				MinimumDistanceFromRecentEncounterLocations
+			);
+
+			return false;
+		}
+	}
+	else
+	{
+		OutNearestHistoryDistance = 0.0f;
 	}
 
-	OutReason = TEXT("Pacing passed");
+	OutReason = bShouldApplyRecentLocationSpacing
+		? TEXT("Pacing passed")
+		: TEXT("Pacing passed; recent-location spacing not applicable to Authored Point");
+
 	return true;
 }
 
@@ -88,7 +105,7 @@ float AAmbientDirector::GetGlobalPacingRemaining() const
 
 float AAmbientDirector::GetNearestRecentEncounterDistance(const FVector& CandidateLocation) const
 {
-	if (PrototypeEncounterHistory.Num() == 0)
+	if (PrototypeEncounterHistory.Num() == 0)	//debug 반드시 필요한가? 없어도 될 듯?
 	{
 		return TNumericLimits<float>::Max();
 	}
@@ -97,6 +114,11 @@ float AAmbientDirector::GetNearestRecentEncounterDistance(const FVector& Candida
 
 	for (const FAmbientEncounterHistoryEntry& Entry : PrototypeEncounterHistory)
 	{
+		if (!Entry.LocationSource.Equals(TEXT("EQS"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
 		const float Distance = FVector::Dist2D(CandidateLocation, Entry.EncounterLocation);
 		if (Distance < NearestDistance)
 		{

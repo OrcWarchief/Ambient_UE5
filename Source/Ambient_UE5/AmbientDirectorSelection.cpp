@@ -225,6 +225,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	float NearestHistoryDistance = 0.0f;
 
 	if (!DoesCandidatePassDirectorPacing(
+		Definition,
 		OutSpawnTransform,
 		PacingReason,
 		GlobalPacingRemaining,

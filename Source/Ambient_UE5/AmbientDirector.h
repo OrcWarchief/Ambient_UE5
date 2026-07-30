@@ -327,6 +327,7 @@ private:
 	) const;
 
 	bool DoesCandidatePassDirectorPacing(
+		const FAmbientEncounterDefinition& Definition,
 		const FTransform& CandidateSpawnTransform,
 		FString& OutReason,
 		float& OutGlobalPacingRemaining,
@@ -356,6 +357,8 @@ private:
 	bool TrySpawnOrUpdatePrototypeEncounter();
 
 	void StartPrototypeEncounter();
+
+	void RemoveWaitingPrototypeEncounter(const FString& Reason);
 
 	void BeginPrototypeCleanup(const FString& Reason);
 

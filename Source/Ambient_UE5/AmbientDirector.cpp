@@ -51,10 +51,12 @@ void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalStat
 
 		if (!DoesDefinitionMatchTraversal(RuntimeEncounterDefinition, TraversalMatchReason))
 		{
-			DestroyPrototypeEncounter();
-
-			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
-			bHasRuntimeEncounterDefinition = false;
+			RemoveWaitingPrototypeEncounter(
+				FString::Printf(
+					TEXT("Waiting encounter removed because traversal changed: %s"),
+					*TraversalMatchReason
+				)
+			);
 		}
 	}
 
@@ -376,10 +378,11 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 		}
 		else
 		{
-			// Encounter 액터가 이미 있는 상태
-			// 특정 Region에서만 유지되어야 하는 Encounter인지 확인
+			const bool bHasRequiredRegion =
+				Definition.RequiredRegionTag.IsValid() ||
+				Definition.RequiredRegionName != NAME_None;
 
-			if (Definition.RequiredRegionName != NAME_None)
+			if (bHasRequiredRegion)
 			{
 				// 플레이어가 필수 Region을 벗어난 경우
 				// Waiting 중이던 Encounter 제거
@@ -399,28 +402,40 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 				if (bWrongRegion)
 				{
-					DestroyPrototypeEncounter();
+					RemoveWaitingPrototypeEncounter(
+						TEXT("Waiting encounter removed because player left required region")
+					);
 
-					RuntimeEncounterDefinition = FAmbientEncounterDefinition();
-					bHasRuntimeEncounterDefinition = false;
-					RuntimeEncounterRegionName = NAME_None;
-					RuntimeEncounterPointName = NAME_None;
-					RuntimeEncounterStartedAtTimeSeconds = 0.0f;
-
-					CurrentWorldState.PrototypeEncounterRuntimeReason =
-						TEXT("Waiting encounter removed because player left required region");
 					return;
 				}
 			}
 		}
 
-		// Encounter는 준비됨
-		// 플레이어 접근 대기 상태
-		CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("Waiting for player approach");
-
 		const float DistanceToEncounter = GetDistanceFromPlayerToPrototypeEncounter();
 
+		if (Definition.WaitingAbandonDistance > 0.0f)
+		{
+			// 플레이어가 Abandon 거리 밖으로 나가면 Waiting 제거
+			const float MaximumInitialSpawnDistance = FMath::Min(Definition.EncounterPointSearchRadius, MaximumSpawnDistance);
+			const float SafeWaitingAbandonDistance = FMath::Max(Definition.WaitingAbandonDistance, MaximumInitialSpawnDistance + 100.f);
+
+			if (DistanceToEncounter >= SafeWaitingAbandonDistance)
+			{
+				RemoveWaitingPrototypeEncounter(
+					FString::Printf(
+						TEXT("Waiting encounter removed because player left abandon distance (%.0f >= %.0f)"),
+						DistanceToEncounter,
+						SafeWaitingAbandonDistance
+					)
+				);
+
+				return;
+			}
+		}
+
+		// Encounter는 준비됨
 		// 플레이어가 Engage 거리 안으로 들어오면 Encounter 시작
+		CurrentWorldState.PrototypeEncounterRuntimeReason = TEXT("Waiting for player approach");
 		if (DistanceToEncounter <= Definition.PlayerEngageDistance)
 		{
 			StartPrototypeEncounter();
@@ -712,6 +727,34 @@ void AAmbientDirector::StartPrototypeEncounter()
 	{
 		SaveDirectorStateToSlot();
 	}
+}
+
+void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
+{
+	if (PrototypeEncounterState != EAmbientEncounterRuntimeState::Waiting)
+	{
+		return;
+	}
+
+	DestroyPrototypeEncounter();
+
+	RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+	bHasRuntimeEncounterDefinition = false;
+
+	RuntimeEncounterRegionName = NAME_None;
+	RuntimeEncounterPointName = NAME_None;
+	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
+	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
+	RuntimeEncounterLocation = FVector::ZeroVector;
+	RuntimeEncounterLocationSource = TEXT("Unknown");
+
+	PrototypeCleanupEndTimeSeconds = 0.0f;
+	PrototypeCooldownEndTimeSeconds = 0.0f;
+	PendingPrototypeFinishReason = TEXT("None");
+
+	CurrentWorldState.bHasActivePrototypeEncounter = false;
+	CurrentWorldState.DistanceToPrototypeEncounter = 0.0f;
+	CurrentWorldState.PrototypeEncounterRuntimeReason = Reason;
 }
 
 void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)

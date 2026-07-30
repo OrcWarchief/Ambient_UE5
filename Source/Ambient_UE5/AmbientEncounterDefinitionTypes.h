@@ -92,6 +92,9 @@ struct FAmbientEncounterDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm"))
 	float PlayerLeaveDistance = 900.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm"))
+	float WaitingAbandonDistance = 2200.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "s"))
 	float CleanupDelaySeconds = 3.0f;
 
