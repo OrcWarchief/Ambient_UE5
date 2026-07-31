@@ -3,11 +3,13 @@
 #include "AmbientEncounterPoint.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "EnvironmentQuery/EnvQuery.h"
 #include "EnvironmentQuery/EnvQueryManager.h"
 #include "EnvironmentQuery/EnvQueryTypes.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
@@ -147,6 +149,30 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 	return true;
 }
 
+float AAmbientDirector::GetAutomaticEQSSpawnHeightOffset(const FAmbientEncounterDefinition& Definition) const
+{
+	if (!Definition.EncounterClass)
+	{
+		return 0.0f;
+	}
+
+	const ACharacter* CharacterDefaultObject = Cast<ACharacter>(Definition.EncounterClass->GetDefaultObject());
+
+	if (!IsValid(CharacterDefaultObject))
+	{
+		return 0.0f;
+	}
+
+	const UCapsuleComponent* Capsule = CharacterDefaultObject->GetCapsuleComponent();
+
+	if (!IsValid(Capsule))
+	{
+		return 0.0f;
+	}
+
+	return Capsule->GetScaledCapsuleHalfHeight();
+}
+
 bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 	const FAmbientEncounterDefinition& Definition,
 	FTransform& OutSpawnTransform,
@@ -232,17 +258,34 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 		? FRotator::ZeroRotator
 		: ToPlayer.Rotation();
 
-	OutSpawnTransform = FTransform(SpawnRotation, FinalLocation, FVector::OneVector);
+	const float AutomaticHeightOffset = GetAutomaticEQSSpawnHeightOffset(Definition);
+	const FVector ActorSpawnLocation = FinalLocation + FVector::UpVector * AutomaticHeightOffset;
+
+	OutSpawnTransform = FTransform(SpawnRotation, ActorSpawnLocation, FVector::OneVector);
 	OutDistanceToLocation = FVector::Dist2D(CurrentWorldState.PlayerLocation, FinalLocation);
 
 	OutReason = FString::Printf(
-		TEXT("EQS accepted | Raw=(X=%.0f Y=%.0f Z=%.0f) Final=(X=%.0f Y=%.0f Z=%.0f) Distance=%.0f cm | %s"),
+		TEXT(
+			"EQS accepted | "
+			"Raw=(X=%.0f Y=%.0f Z=%.0f) "
+			"Ground=(X=%.0f Y=%.0f Z=%.0f) "
+			"Spawn=(X=%.0f Y=%.0f Z=%.0f) "
+			"HeightOffset=%.0f "
+			"Distance=%.0f cm | %s"
+		),
 		RawEQSLocation.X,
 		RawEQSLocation.Y,
 		RawEQSLocation.Z,
+
 		FinalLocation.X,
 		FinalLocation.Y,
 		FinalLocation.Z,
+
+		ActorSpawnLocation.X,
+		ActorSpawnLocation.Y,
+		ActorSpawnLocation.Z,
+
+		AutomaticHeightOffset,
 		OutDistanceToLocation,
 		*ValidationReason
 	);

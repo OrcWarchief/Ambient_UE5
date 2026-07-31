@@ -302,6 +302,10 @@ private:
 		FString& OutReason
 	) const;
 
+	float GetAutomaticEQSSpawnHeightOffset(
+		const FAmbientEncounterDefinition& Definition
+	) const;
+
 	bool FindEQSSpawnTransformForDefinition(
 		const FAmbientEncounterDefinition& Definition,
 		FTransform& OutSpawnTransform,

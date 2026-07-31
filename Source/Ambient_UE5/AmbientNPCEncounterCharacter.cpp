@@ -29,7 +29,7 @@ AAmbientNPCEncounterCharacter::AAmbientNPCEncounterCharacter()
 	DebugBodyMesh->SetupAttachment(GetRootComponent());
 	DebugBodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	DebugBodyMesh->SetGenerateOverlapEvents(false);
-	DebugBodyMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 90.0f));
+	DebugBodyMesh->SetRelativeLocation(FVector::ZeroVector);
 	DebugBodyMesh->SetRelativeScale3D(FVector(0.6f, 0.6f, 1.8f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultBodyMesh(
@@ -43,7 +43,7 @@ AAmbientNPCEncounterCharacter::AAmbientNPCEncounterCharacter()
 
 	FloatingText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("FloatingText"));
 	FloatingText->SetupAttachment(GetRootComponent());
-	FloatingText->SetRelativeLocation(FVector(0.0f, 0.0f, 230.0f));
+	FloatingText->SetRelativeLocation(FVector(0.0f, 0.0f, 190.0f));
 	FloatingText->SetWorldSize(36.0f);
 	FloatingText->SetTextRenderColor(FColor::White);
 	FloatingText->SetText(FText::FromString(TEXT("NPC")));
