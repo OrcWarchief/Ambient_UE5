@@ -80,6 +80,9 @@ struct FAmbientEncounterDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection", meta = (ClampMin = "0.0"))
 	float RecentlyCompletedPenalty = 25.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection")
+	bool bOneShotPerHistory = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm"))
 	float EncounterPointSearchRadius = 1200.0f;
 

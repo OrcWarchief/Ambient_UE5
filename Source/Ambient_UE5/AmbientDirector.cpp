@@ -66,6 +66,37 @@ void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalStat
 	}
 }
 
+bool AAmbientDirector::RequestActiveEncounterResolution(AActor* RequestingEncounter, const FString& FinishReason)
+{
+	if (!IsValid(RequestingEncounter))
+	{
+		return false;
+	}
+
+	if (PrototypeEncounterState != EAmbientEncounterRuntimeState::Active)
+	{
+		return false;
+	}
+
+	if (!IsValid(ActivePrototypeEncounter) || 
+		ActivePrototypeEncounter.Get() != RequestingEncounter)
+	{
+		return false;
+	}
+
+	FString SafeFinishReason = FinishReason;
+	SafeFinishReason.TrimStartAndEndInline();
+
+	if (SafeFinishReason.IsEmpty())
+	{
+		SafeFinishReason = TEXT("Resolved by active encounter");
+	}
+
+	BeginPrototypeCleanup(SafeFinishReason);
+
+	return true;
+}
+
 void AAmbientDirector::BeginPlay()
 {
 	Super::BeginPlay();

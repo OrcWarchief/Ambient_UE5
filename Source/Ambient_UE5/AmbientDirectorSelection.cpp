@@ -321,6 +321,15 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		return false;
 	}
 
+	if (Definition.bOneShotPerHistory && HasRecentlyFinishedEncounter(Definition.EncounterId))
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: one-shot definition %s has already been completed"),
+			*Definition.EncounterId.ToString()
+		);
+		return false;
+	}
+
 	if (Definition.RequiredRegionTag.IsValid())
 	{
 		if (!CurrentWorldState.WorldTags.HasTagExact(Definition.RequiredRegionTag))

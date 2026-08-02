@@ -36,6 +36,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
 	AActor* GetTraversalActor() const { return TraversalActor.Get(); }
 
+	UFUNCTION(BlueprintCallable, Category = "Ambient Director|Encounter Runtime")
+	bool RequestActiveEncounterResolution(AActor* RequestingEncounter, const FString& FinishReason);
+
 
 protected:
 	virtual void BeginPlay() override;
