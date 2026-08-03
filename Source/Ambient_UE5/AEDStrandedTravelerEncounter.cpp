@@ -33,7 +33,7 @@ AAEDStrandedTravelerEncounter::AAEDStrandedTravelerEncounter()
 	ResolutionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ResolutionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	ResolutionSphere->SetGenerateOverlapEvents(true);
-	ResolutionSphere->OnComponentEndOverlap.AddDynamic(this, &AAEDStrandedTravelerEncounter::HandleInteractionRangeEndOverlap);
+	ResolutionSphere->OnComponentEndOverlap.AddDynamic(this, &AAEDStrandedTravelerEncounter::HandleResolutionRangeEndOverlap);
 
 	InteractionPrompt = CreateDefaultSubobject<UTextRenderComponent>(TEXT("InteractionPrompt"));
 	InteractionPrompt->SetupAttachment(GetRootComponent());
@@ -94,8 +94,7 @@ void AAEDStrandedTravelerEncounter::OnAmbientEncounterActivated_Implementation()
 	bEncounterActive = true;
 	bOutcomeSubmitted = false;
 
-	APawn* PlayerPawn =
-		UGameplayStatics::GetPlayerPawn(this, 0);
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
 
 	bPlayerInsideInteractionRange =
 		IsValid(PlayerPawn) &&
@@ -316,7 +315,7 @@ void AAEDStrandedTravelerEncounter::EnableInteractionInput()
 		return;
 	}
 
-	EnableInput(PlayerController);
+	AActor::EnableInput(PlayerController);
 
 	if (InputComponent && !bInteractionInputBound)
 	{
@@ -343,7 +342,7 @@ void AAEDStrandedTravelerEncounter::DisableInteractionInput()
 
 	if (IsValid(PlayerController))
 	{
-		DisableInput(PlayerController);
+		AActor::DisableInput(PlayerController);
 	}
 }
 
