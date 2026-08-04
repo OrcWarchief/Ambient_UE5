@@ -103,7 +103,19 @@ void AAEDStrandedTravelerEncounter::OnAmbientEncounterActivated_Implementation()
 			PlayerPawn
 		);
 
-	EnableInteractionInput();
+	if (
+		bPlayerInsideInteractionRange &&
+		!bHelpAccepted &&
+		!bOutcomeSubmitted
+		)
+	{
+		EnableInteractionInput();
+	}
+	else
+	{
+		DisableInteractionInput();
+	}
+
 	UpdateInteractionPrompt();
 
 	PrintInteractionDebug(
@@ -209,6 +221,15 @@ void AAEDStrandedTravelerEncounter::HandleInteractionRangeBeginOverlap(
 
 	bPlayerInsideInteractionRange = true;
 
+	if (
+		bEncounterActive &&
+		!bHelpAccepted &&
+		!bOutcomeSubmitted
+		)
+	{
+		EnableInteractionInput();
+	}
+
 	UpdateInteractionPrompt();
 }
 
@@ -226,6 +247,7 @@ void AAEDStrandedTravelerEncounter::HandleInteractionRangeEndOverlap(
 
 	bPlayerInsideInteractionRange = false;
 
+	DisableInteractionInput();
 	UpdateInteractionPrompt();
 }
 
@@ -267,6 +289,8 @@ void AAEDStrandedTravelerEncounter::HandleInteractPressed()
 	}
 
 	bHelpAccepted = true;
+
+	DisableInteractionInput();
 
 	SetFloatingText(HelpAcceptedText);
 	UpdateInteractionPrompt();
