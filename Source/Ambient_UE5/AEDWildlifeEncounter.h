@@ -8,6 +8,7 @@
 #include "TimerManager.h"
 #include "AEDWildlifeEncounter.generated.h"
 
+class AAIController;
 class AAmbientDirector;
 class APawn;
 class USceneComponent;
@@ -66,6 +67,29 @@ protected:
 	float FleeDirectionYawOffsetDegrees = 0.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "1.0", ClampMax = "45.0", Units = "deg"))
+	float FleeDirectionSearchStepDegrees = 15.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "0.0", ClampMax = "90.0", Units = "deg"))
+	float MaxFleeDirectionSearchAngleDegrees = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "0.25", ClampMax = "1.0"))
+	float MinimumFleeDistanceScale = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "0.05", ClampMax = "0.5"))
+	float FleeDistanceScaleStep = 0.25f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee")
+	FVector FleeNavigationProjectionExtent = FVector(250.0f, 250.0f, 300.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float MaxFleeDestinationHeightDelta = 225.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
 		meta = (ClampMin = "0.1", Units = "s"))
 	float FleeDurationBeforeResolution = 2.5f;
 
@@ -108,10 +132,34 @@ private:
 
 	void StartWildlifeFlee();
 
+	AAIController* PrepareWildlifeMemberForFlee(APawn* WildlifeMember) const;
+
+	APawn* GetFleePlanReferenceMember(int32& OutMemberIndex) const;
+
+	bool TryFindReachableFleeDestination(
+		APawn* WildlifeMember,
+		int32 MemberIndex,
+		const FVector& FleeDirection,
+		float DistanceScale,
+		float LateralScale,
+		FVector& OutDestination
+	) const;
+
+	bool FindReachableHerdFleePlan(
+		const FVector& BaseFleeDirection,
+		float SearchDirectionSign,
+		float& OutYawOffsetDegrees,
+		float& OutDistanceScale
+	) const;
+
 	bool IssueFleeMove(
 		APawn* WildlifeMember,
 		int32 MemberIndex,
-		const FVector& FleeDirection);
+		const FVector& BaseFleeDirection,
+		float PlannedYawOffsetDegrees,
+		float PlannedDistanceScale,
+		float SearchDirectionSign
+	);
 
 	void ResolveWildlifeFlee();
 	void ClearFleeResolutionTimer();

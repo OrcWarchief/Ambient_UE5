@@ -7,7 +7,6 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -17,6 +16,9 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+
+#include "NavigationPath.h"
+#include "NavigationSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAEDWildlifeEncounter, Log, All);
 
@@ -59,8 +61,7 @@ void AAEDWildlifeEncounter::InitializeAmbientEncounter_Implementation(const FAmb
 			*GetNameSafe(CachedDirector),
 			*Context.EncounterId.ToString(),
 			SpawnedWildlifeMembers.Num()),
-		!IsValid(CachedDirector) || !bSpawnedMembers
-	);
+		!IsValid(CachedDirector) || !bSpawnedMembers);
 }
 
 void AAEDWildlifeEncounter::OnAmbientEncounterWaiting_Implementation()
@@ -317,12 +318,7 @@ FVector AAEDWildlifeEncounter::CalculateFleeDirection() const
 
 void AAEDWildlifeEncounter::StartWildlifeFlee()
 {
-	if (bFleeStarted || bOutcomeSubmitted)
-	{
-		return;
-	}
-
-	if (!bEncounterActive)
+	if (bFleeStarted || bOutcomeSubmitted || !bEncounterActive)
 	{
 		return;
 	}
@@ -334,13 +330,29 @@ void AAEDWildlifeEncounter::StartWildlifeFlee()
 
 	bFleeStarted = true;
 
-	const FVector FleeDirection = CalculateFleeDirection();
+	const FVector BaseFleeDirection = CalculateFleeDirection().GetSafeNormal2D();
+	const float SearchDirectionSign = FMath::RandBool() ? 1.0f : -1.0f;
+
+	float PlannedYawOffsetDegrees = 0.0f;
+	float PlannedDistanceScale = FMath::Clamp(MinimumFleeDistanceScale, 0.25f, 1.0f);
+
+	const bool bFoundFleePlan = FindReachableHerdFleePlan(
+		BaseFleeDirection,
+		SearchDirectionSign,
+		PlannedYawOffsetDegrees,
+		PlannedDistanceScale);
+
 	int32 SuccessfulMoveRequestCount = 0;
 
 	for (int32 MemberIndex = 0; MemberIndex < SpawnedWildlifeMembers.Num(); ++MemberIndex)
 	{
-		APawn* WildlifeMember = SpawnedWildlifeMembers[MemberIndex];
-		if (IssueFleeMove(WildlifeMember, MemberIndex, FleeDirection))
+		if (IssueFleeMove(
+			SpawnedWildlifeMembers[MemberIndex],
+			MemberIndex,
+			BaseFleeDirection,
+			PlannedYawOffsetDegrees,
+			PlannedDistanceScale,
+			SearchDirectionSign))
 		{
 			++SuccessfulMoveRequestCount;
 		}
@@ -360,32 +372,319 @@ void AAEDWildlifeEncounter::StartWildlifeFlee()
 		SafeResolutionDelay,
 		false);
 
+	const FVector PlannedDirection = BaseFleeDirection
+		.RotateAngleAxis(PlannedYawOffsetDegrees, FVector::UpVector)
+		.GetSafeNormal2D();
+
 	PrintWildlifeDebug(
 		FString::Printf(
-			TEXT("Flee started | MoveRequests=%d/%d | Direction=(%.2f, %.2f)"),
+			TEXT("Flee started | MoveRequests=%d/%d | Plan=%s | YawOffset=%.0f | "
+				 "DistanceScale=%.2f | Direction=(%.2f, %.2f)"),
 			SuccessfulMoveRequestCount,
 			SpawnedWildlifeMembers.Num(),
-			FleeDirection.X,
-			FleeDirection.Y),
+			bFoundFleePlan ? TEXT("Found") : TEXT("Fallback"),
+			PlannedYawOffsetDegrees,
+			PlannedDistanceScale,
+			PlannedDirection.X,
+			PlannedDirection.Y),
 		SuccessfulMoveRequestCount == 0
 	);
 }
 
-bool AAEDWildlifeEncounter::IssueFleeMove(APawn* WildlifeMember, int32 MemberIndex, const FVector& FleeDirection)
+AAIController* AAEDWildlifeEncounter::PrepareWildlifeMemberForFlee(APawn* WildlifeMember) const
 {
 	if (!IsValid(WildlifeMember))
 	{
-		return false;
+		return nullptr;
 	}
 
 	if (AAEDWildlifeMemberCharacter* AEDWildlifeMember =
-			Cast<AAEDWildlifeMemberCharacter>(WildlifeMember))
+		Cast<AAEDWildlifeMemberCharacter>(WildlifeMember))
 	{
 		AEDWildlifeMember->PrepareForAmbientFlee(FleeSpeed);
 	}
 	else if (ACharacter* Character = Cast<ACharacter>(WildlifeMember))
 	{
 		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+		{
+			Movement->MaxWalkSpeed = FMath::Max(100.0f, FleeSpeed);
+			Movement->bOrientRotationToMovement = true;
+		}
+	}
+
+	if (!IsValid(WildlifeMember->GetController()))
+	{
+		WildlifeMember->SpawnDefaultController();
+	}
+
+	return Cast<AAIController>(WildlifeMember->GetController());
+}
+
+APawn* AAEDWildlifeEncounter::GetFleePlanReferenceMember(int32& OutMemberIndex) const
+{
+	OutMemberIndex = INDEX_NONE;
+
+	APawn* ReferenceMember = nullptr;
+	float LargestAgentRadius = -1.0f;
+
+	for (int32 MemberIndex = 0; MemberIndex < SpawnedWildlifeMembers.Num(); ++MemberIndex)
+	{
+		APawn* WildlifeMember = SpawnedWildlifeMembers[MemberIndex];
+
+		AAIController* AIController = PrepareWildlifeMemberForFlee(WildlifeMember);
+
+		if (!IsValid(AIController) || AIController->GetPawn() != WildlifeMember)
+		{
+			continue;
+		}
+
+		const float AgentRadius = AIController->GetNavAgentPropertiesRef().AgentRadius;
+
+		if (!IsValid(ReferenceMember) || AgentRadius > LargestAgentRadius)
+		{
+			ReferenceMember = WildlifeMember;
+			OutMemberIndex = MemberIndex;
+			LargestAgentRadius = AgentRadius;
+		}
+	}
+
+	return ReferenceMember;
+}
+
+bool AAEDWildlifeEncounter::TryFindReachableFleeDestination(
+	APawn* WildlifeMember, 
+	int32 MemberIndex, 
+	const FVector& FleeDirection, 
+	float DistanceScale, 
+	float LateralScale, 
+	FVector& OutDestination) const
+{
+	OutDestination = FVector::ZeroVector;
+
+	UWorld* World = GetWorld();
+
+	if (!World || !IsValid(WildlifeMember))
+	{
+		return false;
+	}
+
+	AAIController* AIController = Cast<AAIController>(WildlifeMember->GetController());
+
+	if (!IsValid(AIController))
+	{
+		return false;
+	}
+
+	UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+
+	if (!IsValid(NavigationSystem))
+	{
+		return false;
+	}
+
+	const FVector SafeFleeDirection = FleeDirection.GetSafeNormal2D();
+
+	if (SafeFleeDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector ProjectionExtent(
+		FMath::Max(1.0f, FMath::Abs(FleeNavigationProjectionExtent.X)),
+		FMath::Max(1.0f, FMath::Abs(FleeNavigationProjectionExtent.Y)),
+		FMath::Max(1.0f, FMath::Abs(FleeNavigationProjectionExtent.Z)));
+
+	const FNavAgentProperties& AgentProperties = AIController->GetNavAgentPropertiesRef();
+
+	FNavLocation ProjectedStart;
+
+	if (!NavigationSystem->ProjectPointToNavigation(
+		WildlifeMember->GetNavAgentLocation(),
+		ProjectedStart,
+		ProjectionExtent,
+		&AgentProperties))
+	{
+		return false;
+	}
+
+	const int32 SafeMemberCount = FMath::Max(1, SpawnedWildlifeMembers.Num());
+
+	const float CenteredIndex = 
+		static_cast<float>(MemberIndex) - static_cast<float>(SafeMemberCount - 1) * 0.5f;
+
+	const float DistanceVariation = 1.0f + 0.05f * static_cast<float>(MemberIndex % 3);
+
+	const float SafeDistanceScale = FMath::Clamp(DistanceScale, 0.25f, 1.0f);
+
+	const float SafeLateralScale = FMath::Clamp(LateralScale, 0.0f, 1.0f);
+
+	const FVector RightDirection =
+		FVector::CrossProduct(FVector::UpVector, SafeFleeDirection).GetSafeNormal();
+
+	const FVector DesiredDestination =
+		WildlifeMember->GetActorLocation() +
+		SafeFleeDirection *
+		FMath::Max(100.0f, FleeDistance) *
+		DistanceVariation *
+		SafeDistanceScale +
+		RightDirection *
+		CenteredIndex *
+		FMath::Max(0.0f, MemberLateralSpacing) *
+		SafeLateralScale;
+
+	FNavLocation ProjectedDestination;
+
+	if (!NavigationSystem->ProjectPointToNavigation(
+		DesiredDestination,
+		ProjectedDestination,
+		ProjectionExtent,
+		&AgentProperties))
+	{
+		return false;
+	}
+
+	const float ProjectionHeightDelta = 
+		FMath::Abs(ProjectedDestination.Location.Z - DesiredDestination.Z);
+
+	if (MaxFleeDestinationHeightDelta > 0.0f &&
+		ProjectionHeightDelta > MaxFleeDestinationHeightDelta)
+	{
+		return false;
+	}
+
+	UNavigationPath* NavigationPath = 
+		UNavigationSystemV1::FindPathToLocationSynchronously(
+			World,
+			ProjectedStart.Location,
+			ProjectedDestination.Location,
+			AIController);
+
+	if (!IsValid(NavigationPath) ||
+		!NavigationPath->IsValid() ||
+		NavigationPath->IsPartial() ||
+		NavigationPath->PathPoints.Num() < 2)
+	{
+		return false;
+	}
+
+	OutDestination = ProjectedDestination.Location;
+	return true;
+}
+
+bool AAEDWildlifeEncounter::FindReachableHerdFleePlan(
+	const FVector& BaseFleeDirection, 
+	float SearchDirectionSign, 
+	float& OutYawOffsetDegrees,
+	float& OutDistanceScale) const
+{
+	OutYawOffsetDegrees = 0.0f;
+	OutDistanceScale = FMath::Clamp(MinimumFleeDistanceScale, 0.25f, 1.0f);
+
+	int32 ReferenceMemberIndex = INDEX_NONE;
+	APawn* ReferenceMember = GetFleePlanReferenceMember(ReferenceMemberIndex);
+
+	if (!IsValid(ReferenceMember))
+	{
+		PrintWildlifeDebug(TEXT("No valid reference member for flee planning"), true);
+		return false;
+	}
+
+	const FVector SafeBaseDirection = BaseFleeDirection.GetSafeNormal2D();
+
+	if (SafeBaseDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const float PreferredSign = SearchDirectionSign < 0.0f ? -1.0f : 1.0f;
+	const float AngleStep = FMath::Clamp(FleeDirectionSearchStepDegrees, 1.0f, 45.0f);
+	const float MaxSearchAngle = FMath::Clamp(MaxFleeDirectionSearchAngleDegrees, 0.0f, 90.0f);
+
+	TArray<float, TInlineAllocator<16>> YawOffsets;
+	YawOffsets.Add(0.0f);
+
+	const int32 AngleStepCount = FMath::CeilToInt(MaxSearchAngle / AngleStep);
+
+	for (int32 AngleIndex = 1; AngleIndex <= AngleStepCount; ++AngleIndex)
+	{
+		const float Angle = FMath::Min(static_cast<float>(AngleIndex) * AngleStep, MaxSearchAngle);
+
+		YawOffsets.AddUnique(PreferredSign * Angle);
+		YawOffsets.AddUnique(-PreferredSign * Angle);
+	}
+
+	const float MinimumDistanceScale = FMath::Clamp(MinimumFleeDistanceScale, 0.25f, 1.0f);
+	const float DistanceScaleStep = FMath::Clamp(FleeDistanceScaleStep, 0.05f, 0.5f);
+
+	TArray<float, TInlineAllocator<4>> DistanceScales;
+
+	for (float Scale = 1.0f; Scale > MinimumDistanceScale + KINDA_SMALL_NUMBER; Scale -= DistanceScaleStep)
+	{
+		DistanceScales.Add(Scale);
+	}
+
+	DistanceScales.Add(MinimumDistanceScale);
+
+	for (const float DistanceScale : DistanceScales)
+	{
+		for (const float YawOffsetDegrees : YawOffsets)
+		{
+			const FVector CandidateDirection =
+				SafeBaseDirection
+				.RotateAngleAxis(YawOffsetDegrees, FVector::UpVector)
+				.GetSafeNormal2D();
+
+			FVector CandidateDestination;
+
+			if (!TryFindReachableFleeDestination(
+				ReferenceMember,
+				ReferenceMemberIndex,
+				CandidateDirection,
+				DistanceScale,
+				0.0f,
+				CandidateDestination))
+			{
+				continue;
+			}
+
+			OutYawOffsetDegrees = YawOffsetDegrees;
+			OutDistanceScale = DistanceScale;
+
+			return true;
+		}
+	}
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT("No reachable herd flee plan | Reference=%s"),
+			*GetNameSafe(ReferenceMember)),
+		true);
+
+	return false;
+}
+
+bool AAEDWildlifeEncounter::IssueFleeMove(APawn* WildlifeMember, int32 MemberIndex, const FVector& BaseFleeDirection, float PlannedYawOffsetDegrees, float PlannedDistanceScale, float SearchDirectionSign)
+{
+	if (!IsValid(WildlifeMember))
+	{
+		PrintWildlifeDebug(
+			FString::Printf(
+				TEXT("Member has no AIController | Member=%s"),
+				*GetNameSafe(WildlifeMember)),
+			true);
+
+		return false;
+	}
+
+	if (AAEDWildlifeMemberCharacter* AEDWildlifeMember =
+		Cast<AAEDWildlifeMemberCharacter>(WildlifeMember))
+	{
+		AEDWildlifeMember->PrepareForAmbientFlee(FleeSpeed);
+	}
+	else if (ACharacter* Character = Cast<ACharacter>(WildlifeMember))
+	{
+		if (UCharacterMovementComponent* Movement =
+			Character->GetCharacterMovement())
 		{
 			Movement->MaxWalkSpeed = FMath::Max(100.0f, FleeSpeed);
 			Movement->bOrientRotationToMovement = true;
@@ -401,86 +700,208 @@ bool AAEDWildlifeEncounter::IssueFleeMove(APawn* WildlifeMember, int32 MemberInd
 		WildlifeMember->SpawnDefaultController();
 	}
 
-	AAIController* WildLifeController = Cast<AAIController>(WildlifeMember->GetController());
-	if (!IsValid(WildLifeController))
+	AAIController* WildlifeController =
+		Cast<AAIController>(WildlifeMember->GetController());
+
+	if (!IsValid(WildlifeController))
 	{
-		PrintWildlifeDebug(
-			FString::Printf(
-				TEXT("Member has no AIController | Member=%s"), *GetNameSafe(WildlifeMember)),
-			true);
 		return false;
 	}
 
-	const FVector RightDirection = FVector::CrossProduct(
-		FVector::UpVector, 
-		FleeDirection).GetSafeNormal();
+	const bool bControllerPossessesMember = WildlifeController->GetPawn() == WildlifeMember;
 
-	const int32 SafeMemberCount = FMath::Max(1, SpawnedWildlifeMembers.Num());
-	const float CenteredIndex = static_cast<float>(MemberIndex) -
-		(static_cast<float>(SafeMemberCount - 1) * 0.5f);
-	const float DistanceVariation = 1.0f + (0.05f * static_cast<float>(MemberIndex % 3));
+	UPathFollowingComponent* PathFollowingComponent = WildlifeController->GetPathFollowingComponent();
 
-	const FVector Destination = WildlifeMember->GetActorLocation() +
-		(FleeDirection * FMath::Max(100.0f, FleeDistance) * DistanceVariation) +
-		(RightDirection * CenteredIndex * MemberLateralSpacing);
-
-	WildlifeMember->SetActorRotation(FleeDirection.Rotation());
-
-	const EPathFollowingRequestResult::Type MoveRequestResult =
-		WildLifeController->MoveToLocation(
-			Destination,
-			100.0f,
-			false,
-			true,
-			true,
-			false,
-			nullptr,
-			true);
-
-	if (bDrawFleeDebug && GetWorld())
-	{
-		DrawDebugLine(
-			GetWorld(),
-			WildlifeMember->
-			GetActorLocation(),
-			Destination,
-			FColor::Cyan,
-			false,
-			6.0f,
-			0,
-			3.0f);
-
-		DrawDebugSphere(
-			GetWorld(),
-			Destination,
-			60.0f,
-			12,
-			FColor::Yellow,
-			false,
-			6.0f,
-			0,
-			2.0f);
-	}
-
-	if (MoveRequestResult == EPathFollowingRequestResult::Failed)
+	if (!bControllerPossessesMember || !IsValid(PathFollowingComponent))
 	{
 		PrintWildlifeDebug(
 			FString::Printf(
-				TEXT("Move request failed | Member=%s"), *GetNameSafe(WildlifeMember)),
+				TEXT(
+					"Controller precheck failed | "
+					"Member=%s | Controller=%s | "
+					"Possessed=%s | PathFollowing=%s"),
+				*GetNameSafe(WildlifeMember),
+				*GetNameSafe(WildlifeController),
+				bControllerPossessesMember ? TEXT("Yes") : TEXT("No"),
+				*GetNameSafe(PathFollowingComponent)),
 			true);
+
+
 		return false;
 	}
 
-	if (MoveRequestResult == EPathFollowingRequestResult::AlreadyAtGoal)
+	const FVector SafeBaseFleeDirection = BaseFleeDirection.GetSafeNormal2D();
+
+	if (SafeBaseFleeDirection.IsNearlyZero())
 	{
 		PrintWildlifeDebug(
 			FString::Printf(
-				TEXT("Move request projected to current position | Member=%s"), 
-				*GetNameSafe(WildlifeMember)), true);
+				TEXT("Invalid base flee direction | Member=%s"),
+				*GetNameSafe(WildlifeMember)),
+			true);
+
 		return false;
 	}
 
-	return true;
+	const float MaxSearchAngle = FMath::Clamp(MaxFleeDirectionSearchAngleDegrees, 0.0f, 90.0f);
+	const float SearchAngleStep = FMath::Clamp(FleeDirectionSearchStepDegrees, 1.0f, 45.0f);
+	const float PreferredSearchSign = SearchDirectionSign < 0.0f ? -1.0f : 1.0f;
+	const float MinimumDistanceScale = FMath::Clamp(MinimumFleeDistanceScale, 0.25f, 1.0f);
+	const float SafePlannedYawOffset = FMath::Clamp(PlannedYawOffsetDegrees, -MaxSearchAngle, MaxSearchAngle);
+	const float SafePlannedDistanceScale = FMath::Clamp(PlannedDistanceScale, MinimumDistanceScale, 1.0f);
+
+	auto TryMove =
+		[
+			this,
+			WildlifeMember,
+			MemberIndex,
+			WildlifeController,
+			SafeBaseFleeDirection
+		](
+			const float YawOffsetDegrees,
+			const float DistanceScale,
+			const float LateralScale)
+		{
+			const FVector CandidateDirection =
+				SafeBaseFleeDirection
+				.RotateAngleAxis(YawOffsetDegrees, FVector::UpVector)
+				.GetSafeNormal2D();
+
+			if (CandidateDirection.IsNearlyZero())
+			{
+				return false;
+			}
+
+			FVector CandidateDestination = FVector::ZeroVector;
+
+			if (!TryFindReachableFleeDestination(
+				WildlifeMember,
+				MemberIndex,
+				CandidateDirection,
+				DistanceScale,
+				LateralScale,
+				CandidateDestination))
+			{
+				return false;
+			}
+
+			const EPathFollowingRequestResult::Type MoveRequestResult =
+				WildlifeController->MoveToLocation(
+					CandidateDestination,
+					100.0f,
+					false,
+					true,
+					false,
+					false,
+					nullptr,
+					false);
+
+			if (MoveRequestResult != EPathFollowingRequestResult::RequestSuccessful)
+			{
+				return false;
+			}
+
+			WildlifeMember->SetActorRotation(CandidateDirection.Rotation());
+
+			if (bDrawFleeDebug && GetWorld())
+			{
+				DrawDebugLine(
+					GetWorld(),
+					WildlifeMember->GetActorLocation(),
+					CandidateDestination,
+					FColor::Cyan,
+					false,
+					6.0f,
+					0,
+					3.0f);
+
+				DrawDebugSphere(
+					GetWorld(),
+					CandidateDestination,
+					60.0f,
+					12,
+					FColor::Yellow,
+					false,
+					6.0f,
+					0,
+					2.0f);
+			}
+
+			return true;
+		};
+
+	if (TryMove(SafePlannedYawOffset, SafePlannedDistanceScale, 1.0f))
+	{
+		return true;
+	}
+
+	if (TryMove(SafePlannedYawOffset, SafePlannedDistanceScale, 0.0f))
+	{
+		return true;
+	}
+
+	const float PreferredAlternativeYaw = FMath::Clamp(
+		SafePlannedYawOffset +
+		PreferredSearchSign * SearchAngleStep,
+		-MaxSearchAngle,
+		MaxSearchAngle);
+
+	const float OppositeAlternativeYaw = FMath::Clamp(
+		SafePlannedYawOffset -
+		PreferredSearchSign * SearchAngleStep,
+		-MaxSearchAngle,
+		MaxSearchAngle);
+
+	if (!FMath::IsNearlyEqual(PreferredAlternativeYaw, SafePlannedYawOffset) &&
+		TryMove(PreferredAlternativeYaw, SafePlannedDistanceScale, 0.0f))
+	{
+		return true;
+	}
+
+	if (!FMath::IsNearlyEqual(OppositeAlternativeYaw, SafePlannedYawOffset) &&
+		!FMath::IsNearlyEqual(OppositeAlternativeYaw, PreferredAlternativeYaw) &&
+		TryMove(OppositeAlternativeYaw, SafePlannedDistanceScale, 0.0f))
+	{
+		return true;
+	}
+
+	const float DistanceScaleStep = FMath::Clamp(FleeDistanceScaleStep, 0.05f, 0.5f);
+
+	const float ReducedDistanceScale = FMath::Max(MinimumDistanceScale, SafePlannedDistanceScale - DistanceScaleStep);
+
+	if (ReducedDistanceScale < SafePlannedDistanceScale - KINDA_SMALL_NUMBER)
+	{
+		if (TryMove(SafePlannedYawOffset, ReducedDistanceScale, 0.0f))
+		{
+			return true;
+		}
+
+		if (!FMath::IsNearlyEqual(PreferredAlternativeYaw, SafePlannedYawOffset) &&
+			TryMove(PreferredAlternativeYaw, ReducedDistanceScale, 0.0f))
+		{
+			return true;
+		}
+
+		if (!FMath::IsNearlyEqual(OppositeAlternativeYaw, SafePlannedYawOffset) &&
+			!FMath::IsNearlyEqual(OppositeAlternativeYaw, PreferredAlternativeYaw) &&
+			TryMove(OppositeAlternativeYaw, ReducedDistanceScale, 0.0f))
+		{
+			return true;
+		}
+	}
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT(
+				"No reachable flee move | "
+				"Member=%s | PlannedYaw=%.0f | "
+				"PlannedDistanceScale=%.2f"),
+			*GetNameSafe(WildlifeMember),
+			SafePlannedYawOffset,
+			SafePlannedDistanceScale),
+		true);
+
+
+	return false;
 }
 
 void AAEDWildlifeEncounter::ResolveWildlifeFlee()
@@ -495,21 +916,23 @@ void AAEDWildlifeEncounter::ResolveWildlifeFlee()
 		PrintWildlifeDebug(
 			TEXT("Cannot resolve wildlife encounter: Director is invalid"),
 			true);
+
 		return;
 	}
 
 	bOutcomeSubmitted = true;
 
 	const bool bResolutionAccepted = CachedDirector->RequestActiveEncounterResolution(
-			this,
-			TEXT("Fled from rider"));
+			this, TEXT("Fled from rider"));
 
 	if (!bResolutionAccepted)
 	{
 		bOutcomeSubmitted = false;
 
 		PrintWildlifeDebug(
-			TEXT("Director rejected wildlife resolution request"), true);
+			TEXT("Director rejected wildlife resolution request"),
+			true);
+
 		return;
 	}
 
@@ -561,18 +984,8 @@ void AAEDWildlifeEncounter::PrintWildlifeDebug(const FString& Message, bool bErr
 	if (bError)
 	{
 		UE_LOG(LogAEDWildlifeEncounter, Error, TEXT("%s"), *FullMessage);
-	}
-	else
-	{
-		UE_LOG(LogAEDWildlifeEncounter, Display, TEXT("%s"), *FullMessage);
+		return;
 	}
 
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			4101,
-			2.5f,
-			bError ? FColor::Red : FColor::Green,
-			FullMessage);
-	}
+	UE_LOG(LogAEDWildlifeEncounter, Display, TEXT("%s"), *FullMessage);
 }
