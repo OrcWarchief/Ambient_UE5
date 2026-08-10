@@ -97,6 +97,14 @@ bool AAmbientDirector::RequestActiveEncounterResolution(AActor* RequestingEncoun
 	return true;
 }
 
+bool AAmbientDirector::IsEncounterRuntimeClear() const
+{
+	return PrototypeEncounterState == EAmbientEncounterRuntimeState::Waiting &&
+		!IsValid(ActivePrototypeEncounter.Get()) &&
+		!bHasRuntimeEncounterDefinition &&
+		GetCurrentEncounterBudgetUse() == 0;
+}
+
 void AAmbientDirector::BeginPlay()
 {
 	Super::BeginPlay();

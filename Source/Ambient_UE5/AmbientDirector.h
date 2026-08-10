@@ -39,6 +39,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ambient Director|Encounter Runtime")
 	bool RequestActiveEncounterResolution(AActor* RequestingEncounter, const FString& FinishReason);
 
+	UFUNCTION(BlueprintPure, Category = "Ambient Director|Encounter Runtime")
+	bool IsEncounterRuntimeClear() const;
 
 protected:
 	virtual void BeginPlay() override;
