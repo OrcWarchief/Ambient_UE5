@@ -90,11 +90,15 @@ void AAEDWildlifeEncounter::OnAmbientEncounterActivated_Implementation()
 void AAEDWildlifeEncounter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
 	bEncounterActive = false;
-	ClearFleeResolutionTimer();
+	ResetFleeTracking();
 
 	PrintWildlifeDebug(
 		FString::Printf(
-			TEXT("Cleanup | Reason=%s | Members continue fleeing"), *Reason), false);
+			TEXT(
+				"Cleanup | Reason=%s | "
+				"Members continue fleeing"),
+			*Reason),
+		false);
 }
 
 void AAEDWildlifeEncounter::OnAmbientEncounterFinished_Implementation(const FString& Reason)
@@ -342,33 +346,52 @@ void AAEDWildlifeEncounter::StartWildlifeFlee()
 		PlannedYawOffsetDegrees,
 		PlannedDistanceScale);
 
-	int32 SuccessfulMoveRequestCount = 0;
+	AcceptedFleeStartLocations.Reset();
 
 	for (int32 MemberIndex = 0; MemberIndex < SpawnedWildlifeMembers.Num(); ++MemberIndex)
 	{
+		APawn* WildlifeMember = SpawnedWildlifeMembers[MemberIndex];
+
+		const FVector StartLocation =
+			IsValid(WildlifeMember)
+			? WildlifeMember->GetActorLocation()
+			: FVector::ZeroVector;
+
 		if (IssueFleeMove(
-			SpawnedWildlifeMembers[MemberIndex],
+			WildlifeMember,
 			MemberIndex,
 			BaseFleeDirection,
 			PlannedYawOffsetDegrees,
 			PlannedDistanceScale,
 			SearchDirectionSign))
 		{
-			++SuccessfulMoveRequestCount;
+			AcceptedFleeStartLocations.Add(TWeakObjectPtr<APawn>(WildlifeMember), StartLocation);
 		}
 	}
 
 	if (StartleSound)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, StartleSound, GetActorLocation());
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			StartleSound,
+			GetActorLocation());
+	}
+
+	const int32 SuccessfulMoveRequestCount = AcceptedFleeStartLocations.Num();
+
+	if (SuccessfulMoveRequestCount == 0)
+	{
+		PrintWildlifeDebug(TEXT("Flee failed | No MoveTo request was accepted"), true);
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+		return;
 	}
 
 	const float SafeResolutionDelay = FMath::Max(0.1f, FleeDurationBeforeResolution);
+
 	GetWorldTimerManager().SetTimer(
 		FleeResolutionTimerHandle,
 		this,
-		&AAEDWildlifeEncounter::
-		ResolveWildlifeFlee,
+		&AAEDWildlifeEncounter::ResolveWildlifeFlee,
 		SafeResolutionDelay,
 		false);
 
@@ -911,10 +934,57 @@ void AAEDWildlifeEncounter::ResolveWildlifeFlee()
 		return;
 	}
 
+	if (!HasSuccessfulFleeDisplacement())
+	{
+		PrintWildlifeDebug(TEXT("Flee failed | No accepted member moved the required distance"), true);
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+
+		return;
+	}
+
+	SubmitWildlifeResolution(TEXT("Fled from rider"));
+}
+
+bool AAEDWildlifeEncounter::HasSuccessfulFleeDisplacement() const
+{
+	const float RequiredDistance = FMath::Max(1.0f, MinimumSuccessfulFleeDisplacement);
+	const float RequiredDistanceSquared = FMath::Square(RequiredDistance);
+
+	for (const TPair<TWeakObjectPtr<APawn>, FVector>& Entry : AcceptedFleeStartLocations)
+	{
+		APawn* WildlifeMember = Entry.Key.Get();
+
+		if (!IsValid(WildlifeMember))
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared2D(Entry.Value, WildlifeMember->GetActorLocation());
+
+		if (DistanceSquared >= RequiredDistanceSquared)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+void AAEDWildlifeEncounter::SubmitWildlifeResolution(
+	const FString& OutcomeReason)
+{
+	if (!bEncounterActive || bOutcomeSubmitted)
+	{
+		return;
+	}
+
 	if (!IsValid(CachedDirector))
 	{
 		PrintWildlifeDebug(
-			TEXT("Cannot resolve wildlife encounter: Director is invalid"),
+			FString::Printf(
+				TEXT(
+					"Cannot submit wildlife resolution: "
+					"Director is invalid | Outcome=%s"),
+				*OutcomeReason),
 			true);
 
 		return;
@@ -922,23 +992,38 @@ void AAEDWildlifeEncounter::ResolveWildlifeFlee()
 
 	bOutcomeSubmitted = true;
 
-	const bool bResolutionAccepted = CachedDirector->RequestActiveEncounterResolution(
-			this, TEXT("Fled from rider"));
+	const bool bResolutionAccepted =
+		CachedDirector->RequestActiveEncounterResolution(
+			this,
+			OutcomeReason);
 
 	if (!bResolutionAccepted)
 	{
 		bOutcomeSubmitted = false;
 
 		PrintWildlifeDebug(
-			TEXT("Director rejected wildlife resolution request"),
+			FString::Printf(
+				TEXT(
+					"Director rejected wildlife "
+					"resolution | Outcome=%s"),
+				*OutcomeReason),
 			true);
 
 		return;
 	}
 
 	PrintWildlifeDebug(
-		TEXT("Resolution accepted | Outcome=Fled from rider"),
+		FString::Printf(
+			TEXT(
+				"Resolution accepted | Outcome=%s"),
+			*OutcomeReason),
 		false);
+}
+
+void AAEDWildlifeEncounter::ResetFleeTracking()
+{
+	ClearFleeResolutionTimer();
+	AcceptedFleeStartLocations.Reset();
 }
 
 void AAEDWildlifeEncounter::ClearFleeResolutionTimer()
@@ -970,6 +1055,7 @@ void AAEDWildlifeEncounter::DestroyWildlifeMembers()
 	}
 
 	SpawnedWildlifeMembers.Reset();
+	AcceptedFleeStartLocations.Reset();
 }
 
 void AAEDWildlifeEncounter::PrintWildlifeDebug(const FString& Message, bool bError) const

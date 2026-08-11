@@ -93,6 +93,10 @@ protected:
 		meta = (ClampMin = "0.1", Units = "s"))
 	float FleeDurationBeforeResolution = 2.5f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "1.0", Units = "cm"))
+	float MinimumSuccessfulFleeDisplacement = 200.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Audio")
 	TObjectPtr<USoundBase> StartleSound = nullptr;
 
@@ -162,10 +166,14 @@ private:
 	);
 
 	void ResolveWildlifeFlee();
+	bool HasSuccessfulFleeDisplacement() const;
+	void SubmitWildlifeResolution(const FString& OutcomeReason);
+	void ResetFleeTracking();
 	void ClearFleeResolutionTimer();
 	void DestroyWildlifeMembers();
 
 	void PrintWildlifeDebug(const FString& Message, bool bError) const;
 
 	FTimerHandle FleeResolutionTimerHandle;
+	TMap<TWeakObjectPtr<APawn>, FVector> AcceptedFleeStartLocations;
 };

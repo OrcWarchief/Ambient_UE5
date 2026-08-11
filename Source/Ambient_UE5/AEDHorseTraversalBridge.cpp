@@ -62,11 +62,21 @@ void AAEDHorseTraversalBridge::BeginPlay()
 		&AAEDHorseTraversalBridge::HandlePossessedPawnChanged
 	);
 
-	SyncTraversalFromPawn(ObservedPlayerController->GetPawn());
+	APawn* InitialPawn = ObservedPlayerController->GetPawn();
+	if (IsValid(InitialPawn))
+	{
+		SyncTraversalFromPawn(InitialPawn);
+	}
+	else
+	{
+		ScheduleDeferredTraversalSync();
+	}
 }
 
 void AAEDHorseTraversalBridge::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	CancelDeferredTraversalSync();
+
 	if (IsValid(ObservedPlayerController))
 	{
 		ObservedPlayerController->OnPossessedPawnChanged.RemoveDynamic(
@@ -99,6 +109,8 @@ void AAEDHorseTraversalBridge::HandlePossessedPawnChanged(APawn* OldPawn, APawn*
 
 	if (!IsValid(NewPawn))
 	{
+		ScheduleDeferredTraversalSync();
+
 		if (bPrintBridgeDebug)
 		{
 			UE_LOG(
@@ -106,14 +118,12 @@ void AAEDHorseTraversalBridge::HandlePossessedPawnChanged(APawn* OldPawn, APawn*
 				Log,
 				TEXT(
 					"[AED HORSE BRIDGE] "
-					"NewPawn=None ignored"
-				)
-			);
+					"NewPawn=None; deferred synchronization scheduled"));
 		}
 
 		return;
 	}
-
+	CancelDeferredTraversalSync();
 	SyncTraversalFromPawn(NewPawn);
 }
 
@@ -158,6 +168,63 @@ void AAEDHorseTraversalBridge::SyncTraversalFromPawn(APawn* ObservedPawn)
 	PrintBridgeDebug(ObservedPawn, bMounted);
 }
 
+void AAEDHorseTraversalBridge::ScheduleDeferredTraversalSync()
+{
+	if (!GetWorld() || DeferredTraversalSyncTimerHandle.IsValid())
+	{
+		return;
+	}
+
+	DeferredTraversalSyncTimerHandle =
+		GetWorldTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(
+				this,
+				&AAEDHorseTraversalBridge::
+				ResolveDeferredTraversalSync));
+}
+
+void AAEDHorseTraversalBridge::CancelDeferredTraversalSync()
+{
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(DeferredTraversalSyncTimerHandle);
+	}
+
+	DeferredTraversalSyncTimerHandle.Invalidate();
+}
+
+void AAEDHorseTraversalBridge::ResolveDeferredTraversalSync()
+{
+	DeferredTraversalSyncTimerHandle.Invalidate();
+
+	if (!IsValid(Director))
+	{
+		return;
+	}
+
+	APawn* CurrentPawn = IsValid(ObservedPlayerController)
+		? ObservedPlayerController->GetPawn()
+		: nullptr;
+
+	if (IsValid(CurrentPawn))
+	{
+		SyncTraversalFromPawn(CurrentPawn);
+		return;
+	}
+
+	Director->SetTraversalState(
+		EAmbientTraversalState::OnFoot,
+		nullptr);
+
+	if (bPrintBridgeDebug)
+	{
+		UE_LOG(LogAEDHorseTraversalBridge, Log,
+			TEXT(
+				"[AED HORSE BRIDGE] "
+				"Persistent unpossession normalized to OnFoot"));
+	}
+}
+
 void AAEDHorseTraversalBridge::PrintBridgeDebug(const APawn* ObservedPawn, const bool bMounted) const
 {
 	if (!bPrintBridgeDebug)
@@ -165,26 +232,18 @@ void AAEDHorseTraversalBridge::PrintBridgeDebug(const APawn* ObservedPawn, const
 		return;
 	}
 
-	const TCHAR* TraversalText =
-		bMounted
+	const TCHAR* TraversalText = bMounted
 		? TEXT("Mounted")
 		: TEXT("OnFoot");
 
 	const FString Message = FString::Printf(
 		TEXT(
 			"[AED HORSE BRIDGE] "
-			"Pawn=%s Traversal=%s"
-		),
+			"Pawn=%s Traversal=%s"),
 		*GetNameSafe(ObservedPawn),
-		TraversalText
-	);
+		TraversalText);
 
-	UE_LOG(
-		LogAEDHorseTraversalBridge,
-		Display,
-		TEXT("%s"),
-		*Message
-	);
+	UE_LOG(LogAEDHorseTraversalBridge, Display, TEXT("%s"), *Message);
 
 	if (GEngine)
 	{

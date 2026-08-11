@@ -5,6 +5,8 @@
 
 #include "Components/BoxComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/TargetPoint.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -59,7 +61,7 @@ void AAEDVistaFinaleTrigger::BeginPlay()
 
 void AAEDVistaFinaleTrigger::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	Super::EndPlay(EndPlayReason);
+	ClearRuntimeChecks();
 
 	if (IsValid(CachedSequencePlayer))
 	{
@@ -99,7 +101,7 @@ void AAEDVistaFinaleTrigger::HandleTriggerBeginOverlap(
 
 	TryStartFinale();
 
-	if (!bFinaleStarted)
+	if (!bFinaleStarted && !bFinaleStartFailed)
 	{
 		BeginRuntimeChecks();
 	}
@@ -139,7 +141,7 @@ void AAEDVistaFinaleTrigger::HandleSequenceFinished()
 
 void AAEDVistaFinaleTrigger::BeginRuntimeChecks()
 {
-	if (!GetWorld() || bFinaleStarted)
+	if (!GetWorld() || bFinaleStarted || bFinaleCompleted || bFinaleStartFailed)
 	{
 		return;
 	}
@@ -164,7 +166,8 @@ void AAEDVistaFinaleTrigger::ClearRuntimeChecks()
 
 void AAEDVistaFinaleTrigger::TryStartFinale()
 {
-	if (bFinaleStarted || !bPlayerInsideTrigger)
+	if (bFinaleStarted || bFinaleCompleted ||
+		bFinaleStartFailed || !bPlayerInsideTrigger)
 	{
 		return;
 	}
@@ -201,6 +204,12 @@ bool AAEDVistaFinaleTrigger::CanStartFinale(FString& OutReason) const
 		return false;
 	}
 
+	if (bFinaleStartFailed)
+	{
+		OutReason = TEXT("Finale start previously failed");
+		return false;
+	}
+
 	if (!IsValid(Director))
 	{
 		OutReason = TEXT("Director is invalid");
@@ -213,10 +222,23 @@ bool AAEDVistaFinaleTrigger::CanStartFinale(FString& OutReason) const
 		return false;
 	}
 
+	if (!IsValid(RiderMark))
+	{
+		OutReason = TEXT("RiderMark is invalid");
+		return false;
+	}
+
 	if (bRequireMounted &&
 		Director->GetTraversalState() != EAmbientTraversalState::Mounted)
 	{
 		OutReason = TEXT("Traversal must be Mounted");
+		return false;
+	}
+
+	if (!IsValid(ResolveFinalePawn()))
+	{
+		OutReason = TEXT("Finale Pawn is invalid or does not match TraversalActor");
+
 		return false;
 	}
 
@@ -246,11 +268,36 @@ void AAEDVistaFinaleTrigger::StartFinale()
 		return;
 	}
 
+	APawn* FinalePawn = ResolveFinalePawn();
+
+	if (!IsValid(FinalePawn))
+	{
+		PrintDebugMessage(TEXT("Cannot start: Finale Pawn is invalid."), true);
+		return;
+	}
+
 	bFinaleStarted = true;
 	bFinaleCompleted = false;
 	LastStartBlockReason.Reset();
 
 	ClearRuntimeChecks();
+	SetPlayerInputLocked(true);
+
+	if (!AlignFinalePawn(FinalePawn))
+	{
+		SetPlayerInputLocked(false);
+
+		bFinaleStarted = false;
+		bFinaleCompleted = false;
+		bFinaleStartFailed = true;
+
+		ClearRuntimeChecks();
+
+		PrintDebugMessage(
+			TEXT("Finale start aborted because Pawn alignment failed. "), true);
+
+		return;
+	}
 
 	CachedSequencePlayer->OnFinished.RemoveDynamic(
 		this,
@@ -260,7 +307,6 @@ void AAEDVistaFinaleTrigger::StartFinale()
 		this,
 		&AAEDVistaFinaleTrigger::HandleSequenceFinished);
 
-	SetPlayerInputLocked(true);
 	CachedSequencePlayer->Play();
 
 	PrintDebugMessage(TEXT("Vista finale sequence started."), false);
@@ -314,6 +360,123 @@ bool AAEDVistaFinaleTrigger::IsCurrentPlayerActor(const AActor* Actor) const
 	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
 
 	return IsValid(PlayerPawn) && Actor == PlayerPawn;
+}
+
+APawn* AAEDVistaFinaleTrigger::ResolveFinalePawn() const
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+
+	if (!IsValid(PlayerController))
+	{
+		return nullptr;
+	}
+
+	APawn* ControlledPawn = PlayerController->GetPawn();
+
+	if (!IsValid(ControlledPawn))
+	{
+		return nullptr;
+	}
+
+	if (!bRequireMounted)
+	{
+		return ControlledPawn;
+	}
+
+	if (!IsValid(Director) || Director->GetTraversalState() != EAmbientTraversalState::Mounted)
+	{
+		return nullptr;
+	}
+
+	APawn* TraversalPawn = Cast<APawn>(Director->GetTraversalActor());
+
+	if (!IsValid(TraversalPawn) || TraversalPawn != ControlledPawn)
+	{
+		return nullptr;
+	}
+
+	return TraversalPawn;
+}
+
+bool AAEDVistaFinaleTrigger::AlignFinalePawn(APawn* FinalePawn) const
+{
+	if (!IsValid(FinalePawn) || !IsValid(RiderMark))
+	{
+		return false;
+	}
+
+	UPawnMovementComponent* Movement = FinalePawn->GetMovementComponent();
+	FinalePawn->ConsumeMovementInputVector();
+
+	if (IsValid(Movement))
+	{
+		Movement->StopMovementImmediately();
+	}
+
+	const FVector SourceLocation = FinalePawn->GetActorLocation();
+	const FVector TargetLocation = RiderMark->GetActorLocation();
+	FRotator TargetRotation = RiderMark->GetActorRotation();
+
+	TargetRotation.Pitch = 0.0f;
+	TargetRotation.Roll = 0.0f;
+
+	const bool bMoved =
+		FinalePawn->SetActorLocationAndRotation(
+			TargetLocation,
+			TargetRotation,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+
+	FinalePawn->ConsumeMovementInputVector();
+
+	if (IsValid(Movement))
+	{
+		Movement->StopMovementImmediately();
+	}
+
+	const float LocationError =
+		FVector::Dist(FinalePawn->GetActorLocation(), TargetLocation);
+
+	if (!bMoved || LocationError > 5.0f)
+	{
+		PrintDebugMessage(
+			FString::Printf(
+				TEXT(
+					"Failed to align finale Pawn %s. "
+					"Marker=%s MarkerClass=%s "
+					"From=%s Target=%s Actual=%s "
+					"Error=%.1f cm"),
+				*GetNameSafe(FinalePawn),
+				*GetNameSafe(RiderMark),
+				*GetNameSafe(RiderMark->GetClass()),
+				*SourceLocation.ToCompactString(),
+				*TargetLocation.ToCompactString(),
+				*FinalePawn->GetActorLocation().ToCompactString(),
+				LocationError),
+			true);
+
+		return false;
+	}
+
+	if (AController* Controller = FinalePawn->GetController())
+	{
+		Controller->SetControlRotation(TargetRotation);
+	}
+
+	PrintDebugMessage(
+		FString::Printf(
+			TEXT(
+				"Finale Pawn aligned. "
+				"Pawn=%s Marker=%s "
+				"Target=%s Yaw=%.1f"),
+			*GetNameSafe(FinalePawn),
+			*GetNameSafe(RiderMark),
+			*TargetLocation.ToCompactString(),
+			TargetRotation.Yaw),
+		false);
+
+	return true;
 }
 
 void AAEDVistaFinaleTrigger::PrintDebugMessage(

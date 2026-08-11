@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "AEDHorseTraversalBridge.generated.h"
 
 class AAmbientDirector;
@@ -42,5 +43,11 @@ private:
 
 	void SyncTraversalFromPawn(APawn* ObservedPawn);
 
+	void ScheduleDeferredTraversalSync();
+	void CancelDeferredTraversalSync();
+	void ResolveDeferredTraversalSync();
+
 	void PrintBridgeDebug(const APawn* ObservedPawn, bool bMounted) const;
+
+	FTimerHandle DeferredTraversalSyncTimerHandle;
 };

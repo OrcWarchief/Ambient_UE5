@@ -7,7 +7,9 @@
 
 class AAmbientDirector;
 class ALevelSequenceActor;
+class APawn;
 class APlayerController;
+class ATargetPoint;
 class UBoxComponent;
 class ULevelSequencePlayer;
 class UPrimitiveComponent;
@@ -33,6 +35,9 @@ protected:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "AED|Vista Finale")
 	TObjectPtr<ALevelSequenceActor> VistaSequenceActor = nullptr;
 
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "AED|Vista Finale")
+	TObjectPtr<ATargetPoint> RiderMark = nullptr;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AED|Vista Finale")
 	bool bRequireMounted = true;
 
@@ -57,6 +62,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Vista Finale|Runtime")
 	bool bFinaleCompleted = false;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Vista Finale|Runtime")
+	bool bFinaleStartFailed = false;
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Vista Finale|Runtime")
 	TObjectPtr<ULevelSequencePlayer> CachedSequencePlayer = nullptr;
@@ -92,6 +100,8 @@ private:
 
 	bool CanStartFinale(FString& OutReason) const;
 	bool IsCurrentPlayerActor(const AActor* Actor) const;
+	APawn* ResolveFinalePawn() const;
+	bool AlignFinalePawn(APawn* FinalePawn) const;
 
 	void PrintDebugMessage(const FString& Message, bool bError) const;
 

@@ -24,6 +24,17 @@ AAmbientDirector::AAmbientDirector()
 
 void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalState, AActor* NewTraversalActor)
 {
+	if (NewTraversalState == EAmbientTraversalState::Mounted &&
+		!IsValid(NewTraversalActor))
+	{
+		ensureMsgf(false,
+			TEXT(
+				"Mounted traversal requires "
+				"a valid traversal actor"));
+
+		NewTraversalState = EAmbientTraversalState::OnFoot;
+		NewTraversalActor = nullptr;
+	}
 	AActor* SanitizedTraversalActor = 
 		NewTraversalState == EAmbientTraversalState::Mounted 
 		? NewTraversalActor 
@@ -43,8 +54,7 @@ void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalStat
 
 	SyncTraversalWorldState();
 
-	if (PrototypeEncounterState == 
-			EAmbientEncounterRuntimeState::Waiting &&
+	if (PrototypeEncounterState ==  EAmbientEncounterRuntimeState::Waiting &&
 		bHasRuntimeEncounterDefinition)
 	{
 		FString TraversalMatchReason;
@@ -551,7 +561,7 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 		if (Remaining <= 0.0f)
 		{
 			PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-
+			PrototypeCooldownEndTimeSeconds = 0.0f;
 			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 			bHasRuntimeEncounterDefinition = false;
 
@@ -661,26 +671,30 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 			return false;
 		}
 
-		RuntimeEncounterDefinition = SelectedEncounterDefinition;
-		bHasRuntimeEncounterDefinition = true;
-
+		const FAmbientEncounterDefinition PendingRuntimeDefinition = Definition;
 		const FTransform SpawnTransform = SelectedEncounterSpawnTransform;
 
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.Owner = this;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-		ActivePrototypeEncounter = World->SpawnActor<AActor>(
-			RuntimeEncounterDefinition.EncounterClass,
-			SpawnTransform,
-			SpawnParams
-		);
+		AActor* SpawnedEncounter = World->SpawnActor<AActor>(
+			PendingRuntimeDefinition.EncounterClass,
+			SpawnTransform, SpawnParams);
 
-		if (!IsValid(ActivePrototypeEncounter))
+		if (!IsValid(SpawnedEncounter))
 		{
+			ActivePrototypeEncounter = nullptr;
+			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
+			bHasRuntimeEncounterDefinition = false;
 			CurrentWorldState.PrototypeEncounterBlockReason = TEXT("Spawn failed");
 			return false;
 		}
+
+		ActivePrototypeEncounter = SpawnedEncounter;
+		RuntimeEncounterDefinition = PendingRuntimeDefinition;
+		bHasRuntimeEncounterDefinition = true;
 
 		RuntimeEncounterRegionName		= CurrentWorldState.CurrentRegionName;
 		RuntimeEncounterPointName		= IsValid(SelectedEncounterPoint)
@@ -783,7 +797,6 @@ void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
 	RuntimeEncounterRegionName = NAME_None;
 	RuntimeEncounterPointName = NAME_None;
 	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
-	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
 	RuntimeEncounterLocation = FVector::ZeroVector;
 	RuntimeEncounterLocationSource = TEXT("Unknown");
 
@@ -794,6 +807,11 @@ void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
 	CurrentWorldState.bHasActivePrototypeEncounter = false;
 	CurrentWorldState.DistanceToPrototypeEncounter = 0.0f;
 	CurrentWorldState.PrototypeEncounterRuntimeReason = Reason;
+
+	if (bAutoSaveDirectorStateOnRuntimeChange)
+	{
+		SaveDirectorStateToSlot();
+	}
 }
 
 void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)
