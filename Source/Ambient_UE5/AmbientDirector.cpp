@@ -567,6 +567,12 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 			CurrentWorldState.PrototypeEncounterRuntimeReason =
 				TEXT("Cooldown complete; returning to Waiting");
+			
+			if (bAutoSaveDirectorStateOnRuntimeChange)
+			{
+				SaveDirectorStateToSlot();
+			}
+
 			break;
 		}
 

@@ -3,6 +3,7 @@
 
 #include "AEDCampHorseEncounter.h"
 
+#include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
@@ -16,75 +17,51 @@ AAEDCampHorseEncounter::AAEDCampHorseEncounter()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
-	SetActorEnableCollision(false);
 }
 
 void AAEDCampHorseEncounter::InitializeAmbientEncounter_Implementation(const FAmbientEncounterRuntimeContext& Context)
 {
 	RuntimeContext = Context;
-	TargetHorse = FindTargetHorse();
-
-	if (!IsValid(TargetHorse))
+	
+	if (!TryResolveTargetHorse())
 	{
 		PrintDebugMessage(
 			FString::Printf(
-				TEXT(
-					"Initialize failed to find a horse with Actor Tag=%s"
-				),
+				TEXT("Initialize failed | Horse Actor Tag=%s"),
 				*HorseActorTag.ToString()
-			),
-			true
-		);
+			), true);
 
 		return;
 	}
 
-	bHorseReleased = !TargetHorse->IsHidden();
-
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT(
-				"Initialized | Horse=%s | AlreadyReleased=%s"
-			),
-			*GetNameSafe(TargetHorse),
-			bHorseReleased ? TEXT("Yes") : TEXT("No")
-		),
-		false
-	);
+			TEXT("Initialized | Horse reference cached | Horse=%s"),
+			*GetNameSafe(TargetHorse)
+		), false);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterWaiting_Implementation()
 {
-	if (!IsValid(TargetHorse))
-	{
-		TargetHorse = FindTargetHorse();
-	}
+	const bool bHasValidHorse = TryResolveTargetHorse();
 
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT(
-				"Waiting | Horse=%s | Player must approach the authored point"
-			),
+			TEXT("Waiting | Horse=%s | Horse state unchanged"),
 			*GetNameSafe(TargetHorse)
 		),
-		!IsValid(TargetHorse)
-	);
-	return;
+		!bHasValidHorse);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterActivated_Implementation()
 {
-	if (!ReleaseHorse())
+	if (!TryResolveTargetHorse())
 	{
 		PrintDebugMessage(
 			FString::Printf(
-				TEXT(
-					"Activation failed | No valid horse with Actor Tag=%s"
-				),
+				TEXT("Activation failed | Horse Actor Tag=%s"),
 				*HorseActorTag.ToString()
-			),
-			true
-		);
+			), true);
 
 		return;
 	}
@@ -92,12 +69,11 @@ void AAEDCampHorseEncounter::OnAmbientEncounterActivated_Implementation()
 	PrintDebugMessage(
 		FString::Printf(
 			TEXT(
-				"Horse released | Horse=%s | Player may now mount"
+				"Activated | Horse reference validated | "
+				"Horse visibility, transform and collision unchanged | Horse=%s"
 			),
 			*GetNameSafe(TargetHorse)
-		),
-		false
-	);
+		), false);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
@@ -105,9 +81,11 @@ void AAEDCampHorseEncounter::OnAmbientEncounterCleanup_Implementation(const FStr
 	PrintDebugMessage(
 		FString::Printf(
 			TEXT(
-				"Cleanup | Reason=%s | Horse remains available"
+				"Cleanup | Reason=%s | "
+				"MountPermissionGranted=%s | Horse state unchanged"
 			),
-			*Reason
+			*Reason,
+			bMountPermissionGranted ? TEXT("Yes") : TEXT("No")
 		),
 		false
 	);
@@ -118,17 +96,109 @@ void AAEDCampHorseEncounter::OnAmbientEncounterFinished_Implementation(const FSt
 	PrintDebugMessage(
 		FString::Printf(
 			TEXT(
-				"Finished | Reason=%s | Horse remains available"
+				"Finished | Reason=%s | "
+				"MountPermissionGranted=%s | Horse state unchanged"
 			),
-			*Reason
+			*Reason,
+			bMountPermissionGranted ? TEXT("Yes") : TEXT("No")
 		),
 		false
 	);
 }
 
+bool AAEDCampHorseEncounter::GrantMountPermission()
+{
+	if (bMountPermissionGranted)
+	{
+		PrintDebugMessage(
+			FString::Printf(
+				TEXT("Mount permission already granted | Horse=%s"),
+				*GetNameSafe(TargetHorse)
+			), false);
+
+		return true;
+	}
+
+	if (!TryResolveTargetHorse())
+	{
+		PrintDebugMessage(
+			FString::Printf(
+				TEXT(
+					"GrantMountPermission failed | "
+					"No valid horse with Actor Tag=%s"
+				),
+				*HorseActorTag.ToString()
+			), true);
+
+		return false;
+	}
+
+	UActorComponent* HorseRuntimeComponent = FindHorseRuntimeComponent();
+
+	if (!IsValid(HorseRuntimeComponent))
+	{
+		PrintDebugMessage(
+			FString::Printf(
+				TEXT(
+					"GrantMountPermission failed | "
+					"Horse Runtime component not found | "
+					"Horse=%s | Component Tag=%s"
+				),
+				*GetNameSafe(TargetHorse),
+				*HorseRuntimeComponentTag.ToString()
+			), true);
+
+		return false;
+	}
+
+	bMountPermissionGranted = true;
+
+	HorseRuntimeComponent->Activate(true);
+
+	if (!HorseRuntimeComponent->IsActive())
+	{
+		bMountPermissionGranted = false;
+
+		PrintDebugMessage(
+			FString::Printf(
+				TEXT(
+					"GrantMountPermission failed | "
+					"Horse Runtime component did not activate | Runtime=%s"
+				),
+				*GetNameSafe(HorseRuntimeComponent)
+			), true);
+
+		return false;
+	}
+
+	PrintDebugMessage(
+		FString::Printf(
+			TEXT(
+				"Mount permission granted | "
+				"Horse=%s | Runtime=%s"
+			),
+			*GetNameSafe(TargetHorse),
+			*GetNameSafe(HorseRuntimeComponent)
+		), false);
+
+	return true;
+}
+
+bool AAEDCampHorseEncounter::TryResolveTargetHorse()
+{
+	if (IsValid(TargetHorse))
+	{
+		return true;
+	}
+
+	TargetHorse = FindTargetHorse();
+
+	return IsValid(TargetHorse);
+}
+
 APawn* AAEDCampHorseEncounter::FindTargetHorse() const
 {
-	if (HorseActorTag.IsNone())
+	if (HorseActorTag.IsNone() || GetWorld() == nullptr)
 	{
 		return nullptr;
 	}
@@ -160,40 +230,28 @@ APawn* AAEDCampHorseEncounter::FindTargetHorse() const
 	return ClosestHorse;
 }
 
-bool AAEDCampHorseEncounter::ReleaseHorse()
+UActorComponent* AAEDCampHorseEncounter::FindHorseRuntimeComponent() const
 {
-	if (!IsValid(TargetHorse))
+	if (!IsValid(TargetHorse) || HorseRuntimeComponentTag.IsNone())
 	{
-		TargetHorse = FindTargetHorse();
+		return nullptr;
 	}
 
-	if (!IsValid(TargetHorse))
-	{
-		return false;
-	}
-
-	const bool bHorseWasHidden = TargetHorse->IsHidden();
-
-	if (bHorseWasHidden && bSnapHorseToAuthoredPointOnFirstRelease)
-	{
-		FTransform HandoffTransform = GetActorTransform();
-
-		HandoffTransform.SetScale3D(TargetHorse->GetActorScale3D());
-		
-		TargetHorse->SetActorTransform(
-			HandoffTransform,
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics
+	const TArray<UActorComponent*> RuntimeComponents =
+		TargetHorse->GetComponentsByTag(
+			UActorComponent::StaticClass(),
+			HorseRuntimeComponentTag
 		);
+
+	for (UActorComponent* RuntimeComponent : RuntimeComponents)
+	{
+		if (IsValid(RuntimeComponent))
+		{
+			return RuntimeComponent;
+		}
 	}
 
-	TargetHorse->SetActorHiddenInGame(false);
-	TargetHorse->SetActorEnableCollision(true);
-
-	bHorseReleased = true;
-
-	return true;
+	return nullptr;
 }
 
 void AAEDCampHorseEncounter::PrintDebugMessage(const FString& Message, bool bError) const

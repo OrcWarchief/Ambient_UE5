@@ -222,6 +222,12 @@ bool AAEDVistaFinaleTrigger::CanStartFinale(FString& OutReason) const
 		return false;
 	}
 
+	if (!IsValid(VistaSequenceActor->GetSequencePlayer()))
+	{
+		OutReason = TEXT("Level Sequence Player is invalid");
+		return false;
+	}
+
 	if (!IsValid(RiderMark))
 	{
 		OutReason = TEXT("RiderMark is invalid");

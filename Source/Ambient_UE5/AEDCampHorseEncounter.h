@@ -8,6 +8,7 @@
 #include "AEDCampHorseEncounter.generated.h"
 
 class APawn;
+class UActorComponent;
 class USceneComponent;
 
 UCLASS(Blueprintable)
@@ -30,6 +31,9 @@ public:
 
 	virtual void OnAmbientEncounterFinished_Implementation(const FString& Reason) override;
 
+	UFUNCTION(BlueprintCallable, Category = "AED|Camp Horse")
+	bool GrantMountPermission();
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AED|Camp Horse")
 	TObjectPtr<USceneComponent> SceneRoot = nullptr;
@@ -38,7 +42,7 @@ protected:
 	FName HorseActorTag = TEXT("AED.CampHorse.Primary");
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Camp Horse")
-	bool bSnapHorseToAuthoredPointOnFirstRelease = true;
+	FName HorseRuntimeComponentTag = TEXT("AED.Horse.Runtime");
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Camp Horse|Debug")
 	bool bPrintDebug = true;
@@ -46,15 +50,15 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Camp Horse|Runtime")
 	TObjectPtr<APawn> TargetHorse = nullptr;
 
-	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Camp Horse|Runtime")
-	bool bHorseReleased = false;
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "AED|Camp Horse|Runtime")
+	bool bMountPermissionGranted = false;
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "AED|Camp Horse|Runtime")
 	FAmbientEncounterRuntimeContext RuntimeContext;
 
 private:
+	bool TryResolveTargetHorse();
 	APawn* FindTargetHorse() const;
-
-	bool ReleaseHorse();
+	UActorComponent* FindHorseRuntimeComponent() const;
 	void PrintDebugMessage(const FString& Message, bool bError) const;
 };

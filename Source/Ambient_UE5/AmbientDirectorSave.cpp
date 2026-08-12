@@ -343,6 +343,38 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(
 		return false;
 	}
 
+	if (bActorBackedSnapshot)
+	{
+		if (!RestoredDefinition.EncounterClass)
+		{
+			OutReason = FString::Printf(
+				TEXT(
+					"Encounter definition '%s' "
+					"does not have an EncounterClass"),
+				*Snapshot.RuntimeEncounterId.ToString());
+
+			return false;
+		}
+
+		if (!RestoredDefinition.EncounterClass->ImplementsInterface(
+			UAmbientEncounterRuntimeInterface::StaticClass()))
+		{
+			OutReason = FString::Printf(
+				TEXT(
+					"Encounter class %s does not implement "
+					"AmbientEncounterRuntimeInterface"),
+				*GetNameSafe(RestoredDefinition.EncounterClass.Get()));
+
+			return false;
+		}
+
+		if (!GetWorld())
+		{
+			OutReason = TEXT("Cannot restore actor-backed snapshot: no world");
+			return false;
+		}
+	}
+
 	DestroyPrototypeEncounter();
 	PrototypeEncounterHistory = Snapshot.PrototypeEncounterHistory;
 	PrototypeEncounterStartCount = Snapshot.PrototypeEncounterStartCount;
