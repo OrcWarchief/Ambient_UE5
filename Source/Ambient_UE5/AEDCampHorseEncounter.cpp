@@ -1,13 +1,19 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 
 #include "AEDCampHorseEncounter.h"
 
 #include "Components/ActorComponent.h"
+#include "Components/AudioComponent.h"
+#include "Components/ChildActorComponent.h"
+#include "Components/InputComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SphereComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAEDCampHorseEncounter, Log, All);
 
@@ -17,73 +23,143 @@ AAEDCampHorseEncounter::AAEDCampHorseEncounter()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+
+	CampNpc = CreateDefaultSubobject<UChildActorComponent>(TEXT("CampNpc"));
+	CampNpc->SetupAttachment(SceneRoot);
+
+	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+	InteractionSphere->SetupAttachment(SceneRoot);
+	InteractionSphere->InitSphereRadius(InteractionRadius);
+	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	InteractionSphere->SetGenerateOverlapEvents(true);
+
+	InteractionPrompt = CreateDefaultSubobject<UTextRenderComponent>(TEXT("IntearctionPrompt"));
+	InteractionPrompt->SetupAttachment(SceneRoot);
+	InteractionPrompt->SetRelativeLocation(FVector(0.0f, 0.0f, 220.0f));
+	InteractionPrompt->SetHorizontalAlignment(EHTA_Center);
+	InteractionPrompt->SetWorldSize(28.0f);
+	InteractionPrompt->SetTextRenderColor(FColor::Yellow);
+	InteractionPrompt->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	InteractionPrompt->SetText(InteractionPromptText);
+	InteractionPrompt->SetVisibility(false);
 }
 
 void AAEDCampHorseEncounter::InitializeAmbientEncounter_Implementation(const FAmbientEncounterRuntimeContext& Context)
 {
 	RuntimeContext = Context;
-	
-	if (!TryResolveTargetHorse())
-	{
-		PrintDebugMessage(
-			FString::Printf(
-				TEXT("Initialize failed | Horse Actor Tag=%s"),
-				*HorseActorTag.ToString()
-			), true);
 
-		return;
-	}
+	bEncounterActive = false;
+	bPlayerInsideInteractionRange = false;
+	bArrivalBarkStarted = false;
+	bArrivalBarkCompleted = false;
+	bConversationStarted = false;
+	bConversationCompleted = false;
+	bMountPermissionGranted = false;
+
+	const bool bHasHorse = TryResolveTargetHorse();
+	const bool bHasSarah = TryResolveSarah();
 
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT("Initialized | Horse reference cached | Horse=%s"),
-			*GetNameSafe(TargetHorse)
-		), false);
+			TEXT("Initialized | Horse=%s | Sarah=%s"),
+			*GetNameSafe(TargetHorse),
+			*GetNameSafe(TargetSarah)
+		),
+		!bHasHorse || !bHasSarah
+	);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterWaiting_Implementation()
 {
-	const bool bHasValidHorse = TryResolveTargetHorse();
+	bEncounterActive = false;
+	bPlayerInsideInteractionRange = false;
+
+	StopActiveVoice();
+	DisableInteractionInput();
+
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	UpdateInteractionPrompt();
+
+	const bool bHasHorse = TryResolveTargetHorse();
+	const bool bHasSarah = TryResolveSarah();
 
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT("Waiting | Horse=%s | Horse state unchanged"),
-			*GetNameSafe(TargetHorse)
+			TEXT("Waiting | Horse=%s | Sarah=%s | Horse state unchanged"),
+			*GetNameSafe(TargetHorse),
+			*GetNameSafe(TargetSarah)
 		),
-		!bHasValidHorse);
+		!bHasHorse || !bHasSarah
+	);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterActivated_Implementation()
 {
-	if (!TryResolveTargetHorse())
+	const bool bHasHorse = TryResolveTargetHorse();
+	const bool bHasSarah = TryResolveSarah();
+
+	if (!bHasHorse || !bHasSarah)
 	{
 		PrintDebugMessage(
 			FString::Printf(
-				TEXT("Activation failed | Horse Actor Tag=%s"),
-				*HorseActorTag.ToString()
-			), true);
-
-		return;
+				TEXT("Activation incomplete | Horse=%s | Sarah=%s"),
+				*GetNameSafe(TargetHorse),
+				*GetNameSafe(TargetSarah)
+			),
+			true
+		);
 	}
 
+	bEncounterActive = true;
+
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->UpdateOverlaps();
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+
+	bPlayerInsideInteractionRange =
+		IsValid(PlayerPawn) &&
+		IsValid(InteractionSphere) &&
+		InteractionSphere->IsOverlappingActor(PlayerPawn);
+
+	PlayArrivalBark();
+
 	PrintDebugMessage(
-		FString::Printf(
-			TEXT(
-				"Activated | Horse reference validated | "
-				"Horse visibility, transform and collision unchanged | Horse=%s"
-			),
-			*GetNameSafe(TargetHorse)
-		), false);
+		TEXT(
+			"Activated | Sarah bark started | "
+			"Horse visibility, transform and collision unchanged"
+		),
+		false
+	);
 }
 
 void AAEDCampHorseEncounter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
+	bEncounterActive = false;
+	bPlayerInsideInteractionRange = false;
+
+	StopActiveVoice();
+	DisableInteractionInput();
+
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	UpdateInteractionPrompt();
+
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT(
-				"Cleanup | Reason=%s | "
-				"MountPermissionGranted=%s | Horse state unchanged"
-			),
+			TEXT("Cleanup | Reason=%s | MountPermissionGranted=%s"),
 			*Reason,
 			bMountPermissionGranted ? TEXT("Yes") : TEXT("No")
 		),
@@ -93,12 +169,22 @@ void AAEDCampHorseEncounter::OnAmbientEncounterCleanup_Implementation(const FStr
 
 void AAEDCampHorseEncounter::OnAmbientEncounterFinished_Implementation(const FString& Reason)
 {
+	bEncounterActive = false;
+	bPlayerInsideInteractionRange = false;
+
+	StopActiveVoice();
+	DisableInteractionInput();
+
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	UpdateInteractionPrompt();
+
 	PrintDebugMessage(
 		FString::Printf(
-			TEXT(
-				"Finished | Reason=%s | "
-				"MountPermissionGranted=%s | Horse state unchanged"
-			),
+			TEXT("Finished | Reason=%s | MountPermissionGranted=%s"),
 			*Reason,
 			bMountPermissionGranted ? TEXT("Yes") : TEXT("No")
 		),
@@ -151,8 +237,6 @@ bool AAEDCampHorseEncounter::GrantMountPermission()
 		return false;
 	}
 
-	bMountPermissionGranted = true;
-
 	HorseRuntimeComponent->Activate(true);
 
 	if (!HorseRuntimeComponent->IsActive())
@@ -166,22 +250,434 @@ bool AAEDCampHorseEncounter::GrantMountPermission()
 					"Horse Runtime component did not activate | Runtime=%s"
 				),
 				*GetNameSafe(HorseRuntimeComponent)
-			), true);
+			),
+			true
+		);
 
 		return false;
 	}
 
+	bMountPermissionGranted = true;
+
 	PrintDebugMessage(
 		FString::Printf(
 			TEXT(
-				"Mount permission granted | "
-				"Horse=%s | Runtime=%s"
+				"Mount permission granted | Horse=%s | Runtime=%s"
 			),
 			*GetNameSafe(TargetHorse),
 			*GetNameSafe(HorseRuntimeComponent)
 		), false);
 
 	return true;
+}
+
+void AAEDCampHorseEncounter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(
+			FMath::Max(50.0f, InteractionRadius)
+		);
+	}
+
+	if (InteractionPrompt)
+	{
+		InteractionPrompt->SetText(InteractionPromptText);
+		InteractionPrompt->SetVisibility(false);
+	}
+
+	TryResolveSarah();
+}
+
+void AAEDCampHorseEncounter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	StopActiveVoice();
+	DisableInteractionInput();
+
+	Super::EndPlay(EndPlayReason);
+}
+void AAEDCampHorseEncounter::HandleInteractionRangeBeginOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	int32 OtherBodyIndex,
+	bool bFromSweep,
+	const FHitResult& SweepResult
+)
+{
+	if (!IsCurrentPlayerActor(OtherActor))
+	{
+		return;
+	}
+
+	bPlayerInsideInteractionRange = true;
+	RefreshInteractionAvailability();
+}
+
+void AAEDCampHorseEncounter::HandleInteractionRangeEndOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	int32 OtherBodyIndex
+)
+{
+	if (!IsCurrentPlayerActor(OtherActor))
+	{
+		return;
+	}
+
+	bPlayerInsideInteractionRange = false;
+	RefreshInteractionAvailability();
+}
+
+void AAEDCampHorseEncounter::HandleInteractPressed()
+{
+	if (!CanPlayerInteract())
+	{
+		return;
+	}
+
+	bConversationStarted = true;
+
+	DisableInteractionInput();
+	FaceSarahTowardPlayer();
+	PlayVoice(InteractionLineSound, ECampVoicePhase::InteractionLine);
+
+	PrintDebugMessage(TEXT("Interaction accepted | Sarah horse-offer line started"), false);
+}
+
+void AAEDCampHorseEncounter::PlayArrivalBark()
+{
+	if (bArrivalBarkStarted)
+	{
+		RefreshInteractionAvailability();
+		return;
+	}
+
+	bArrivalBarkStarted = true;
+
+	FaceSarahTowardPlayer();
+	PlayVoice(ArrivalBarkSound, ECampVoicePhase::ArrivalBark);
+}
+
+void AAEDCampHorseEncounter::PlayVoice(USoundBase* Sound, ECampVoicePhase VoicePhase)
+{
+	StopActiveVoice();
+
+	ActiveVoicePhase = VoicePhase;
+	UpdateInteractionPrompt();
+
+	if (!IsValid(Sound))
+	{
+		PrintDebugMessage(
+			VoicePhase == ECampVoicePhase::ArrivalBark
+			? TEXT("Arrival bark sound is not assigned; completing bark immediately")
+			: TEXT("Interaction line sound is not assigned; completing line immediately"),
+			true
+		);
+
+		HandleActiveVoiceFinished();
+		return;
+	}
+
+	USceneComponent* AttachComponent = nullptr;
+
+	if (IsValid(TargetSarah))
+	{
+		AttachComponent = TargetSarah->GetRootComponent();
+	}
+
+	if (!IsValid(AttachComponent))
+	{
+		AttachComponent = CampNpc;
+	}
+
+	if (!IsValid(AttachComponent))
+	{
+		PrintDebugMessage(TEXT("Cannot play Sarah voice: no valid attach component"), true);
+		HandleActiveVoiceFinished();
+		return;
+	}
+
+	ActiveVoiceComponent = UGameplayStatics::SpawnSoundAttached(
+		Sound,
+		AttachComponent,
+		NAME_None,
+		FVector::ZeroVector,
+		FRotator::ZeroRotator,
+		EAttachLocation::KeepRelativeOffset,
+		true,
+		1.0f,
+		1.0f,
+		0.0f,
+		VoiceAttenuation,
+		nullptr,
+		true
+	);
+
+	if (!IsValid(ActiveVoiceComponent))
+	{
+		PrintDebugMessage(TEXT("SpawnSoundAttached failed for Sarah voice"), true);
+		HandleActiveVoiceFinished();
+		return;
+	}
+
+	ActiveVoiceComponent->OnAudioFinished.AddDynamic(
+		this,
+		&AAEDCampHorseEncounter::HandleActiveVoiceFinished
+	);
+}
+
+void AAEDCampHorseEncounter::HandleActiveVoiceFinished()
+{
+	const ECampVoicePhase FinishedVoicePhase = ActiveVoicePhase;
+
+	if (IsValid(ActiveVoiceComponent))
+	{
+		ActiveVoiceComponent->OnAudioFinished.RemoveDynamic(
+			this,
+			&AAEDCampHorseEncounter::HandleActiveVoiceFinished
+		);
+	}
+
+	ActiveVoiceComponent = nullptr;
+	ActiveVoicePhase = ECampVoicePhase::None;
+
+	switch (FinishedVoicePhase)
+	{
+	case ECampVoicePhase::ArrivalBark:
+		bArrivalBarkCompleted = true;
+		RefreshInteractionAvailability();
+
+		PrintDebugMessage(
+			TEXT("Arrival bark completed | Sarah interaction is now available"),
+			false
+		);
+		break;
+
+	case ECampVoicePhase::InteractionLine:
+		CompleteCampConversation();
+		break;
+
+	default:
+		UpdateInteractionPrompt();
+		break;
+	}
+}
+
+void AAEDCampHorseEncounter::StopActiveVoice()
+{
+	UAudioComponent* VoiceComponent = ActiveVoiceComponent.Get();
+
+	ActiveVoiceComponent = nullptr;
+	ActiveVoicePhase = ECampVoicePhase::None;
+
+	if (!IsValid(VoiceComponent))
+	{
+		return;
+	}
+
+	VoiceComponent->OnAudioFinished.RemoveDynamic(
+		this,
+		&AAEDCampHorseEncounter::HandleActiveVoiceFinished
+	);
+
+	VoiceComponent->Stop();
+}
+
+void AAEDCampHorseEncounter::CompleteCampConversation()
+{
+	if (bConversationCompleted)
+	{
+		return;
+	}
+
+	bConversationCompleted = true;
+
+	DisableInteractionInput();
+	UpdateInteractionPrompt();
+
+	// This event executes synchronously. The Blueprint implementation must
+	// call GrantMountPermission before control returns here.
+	BP_OnCampConversationCompleted();
+
+	if (!bMountPermissionGranted)
+	{
+		PrintDebugMessage(
+			TEXT(
+				"Conversation completed, but the horse is still locked | "
+				"Connect BP_OnCampConversationCompleted to GrantMountPermission"
+			),
+			true
+		);
+
+		return;
+	}
+
+	PrintDebugMessage(
+		TEXT(
+			"Conversation completed | Horse unlocked | "
+			"Camp encounter remains active until the player leaves"
+		),
+		false
+	);
+}
+
+void AAEDCampHorseEncounter::RefreshInteractionAvailability()
+{
+	if (CanPlayerInteract())
+	{
+		EnableInteractionInput();
+	}
+	else
+	{
+		DisableInteractionInput();
+	}
+
+	UpdateInteractionPrompt();
+}
+
+void AAEDCampHorseEncounter::UpdateInteractionPrompt()
+{
+	if (!InteractionPrompt)
+	{
+		return;
+	}
+
+	if (!bEncounterActive)
+	{
+		InteractionPrompt->SetVisibility(false);
+		return;
+	}
+
+	if (bShowSpokenLineAsWorldText &&
+		ActiveVoicePhase == ECampVoicePhase::ArrivalBark)
+	{
+		InteractionPrompt->SetText(ArrivalBarkText);
+		InteractionPrompt->SetVisibility(true);
+		return;
+	}
+
+	if (bShowSpokenLineAsWorldText &&
+		ActiveVoicePhase == ECampVoicePhase::InteractionLine)
+	{
+		InteractionPrompt->SetText(InteractionLineText);
+		InteractionPrompt->SetVisibility(true);
+		return;
+	}
+
+	if (CanPlayerInteract())
+	{
+		InteractionPrompt->SetText(InteractionPromptText);
+		InteractionPrompt->SetVisibility(true);
+		return;
+	}
+
+	InteractionPrompt->SetVisibility(false);
+}
+
+void AAEDCampHorseEncounter::EnableInteractionInput()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+
+	if (!IsValid(PlayerController))
+	{
+		PrintDebugMessage(TEXT("Cannot enable Sarah interaction input: invalid PlayerController"), true);
+		return;
+	}
+
+	AActor::EnableInput(PlayerController);
+
+	if (InputComponent && !bInteractionInputBound)
+	{
+		InputComponent->Priority = 10;
+
+		FInputKeyBinding& KeyBinding = InputComponent->BindKey(
+			InteractKey,
+			IE_Pressed,
+			this,
+			&AAEDCampHorseEncounter::HandleInteractPressed
+		);
+
+		KeyBinding.bConsumeInput = true;
+		bInteractionInputBound = true;
+	}
+}
+
+void AAEDCampHorseEncounter::DisableInteractionInput()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+
+	if (IsValid(PlayerController))
+	{
+		AActor::DisableInput(PlayerController);
+	}
+}
+
+bool AAEDCampHorseEncounter::CanPlayerInteract() const
+{
+	return
+		bEncounterActive &&
+		bPlayerInsideInteractionRange &&
+		bArrivalBarkCompleted &&
+		!bConversationStarted &&
+		!bConversationCompleted;
+}
+
+bool AAEDCampHorseEncounter::IsCurrentPlayerActor(const AActor* Actor) const
+{
+	if (!IsValid(Actor))
+	{
+		return false;
+	}
+
+	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+
+	return IsValid(PlayerPawn) && Actor == PlayerPawn;
+}
+
+bool AAEDCampHorseEncounter::TryResolveSarah()
+{
+	if (IsValid(TargetSarah))
+	{
+		return true;
+	}
+
+	if (!IsValid(CampNpc))
+	{
+		return false;
+	}
+
+	TargetSarah = CampNpc->GetChildActor();
+
+	return IsValid(TargetSarah);
+}
+
+void AAEDCampHorseEncounter::FaceSarahTowardPlayer()
+{
+	if (!TryResolveSarah())
+	{
+		return;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+
+	if (!IsValid(PlayerPawn))
+	{
+		return;
+	}
+
+	FVector ToPlayer = PlayerPawn->GetActorLocation() - TargetSarah->GetActorLocation();
+	ToPlayer.Z = 0.0f;
+
+	if (ToPlayer.IsNearlyZero())
+	{
+		return;
+	}
+
+	TargetSarah->SetActorRotation(ToPlayer.Rotation());
 }
 
 bool AAEDCampHorseEncounter::TryResolveTargetHorse()
@@ -204,7 +700,6 @@ APawn* AAEDCampHorseEncounter::FindTargetHorse() const
 	}
 
 	TArray<AActor*> TaggedActors;
-
 	UGameplayStatics::GetAllActorsWithTag(GetWorld(), HorseActorTag, TaggedActors);
 
 	APawn* ClosestHorse = nullptr;
@@ -268,21 +763,11 @@ void AAEDCampHorseEncounter::PrintDebugMessage(const FString& Message, bool bErr
 
 	if (bError)
 	{
-		UE_LOG(
-			LogAEDCampHorseEncounter,
-			Error,
-			TEXT("%s"),
-			*FullMessage
-		);
+		UE_LOG(LogAEDCampHorseEncounter, Error, TEXT("%s"), *FullMessage);
 	}
 	else
 	{
-		UE_LOG(
-			LogAEDCampHorseEncounter,
-			Display,
-			TEXT("%s"),
-			*FullMessage
-		);
+		UE_LOG(LogAEDCampHorseEncounter, Display, TEXT("%s"), *FullMessage);
 	}
 
 	if (GEngine)
