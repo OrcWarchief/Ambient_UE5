@@ -79,6 +79,10 @@ protected:
 	float MinimumFleeDistanceScale = 0.5f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
+		meta = (ClampMin = "1", ClampMax = "8"))
+	int32 MinimumSuccessfulFleeMemberCount = 1;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
 		meta = (ClampMin = "0.05", ClampMax = "0.5"))
 	float FleeDistanceScaleStep = 0.25f;
 
@@ -166,7 +170,7 @@ private:
 	);
 
 	void ResolveWildlifeFlee();
-	bool HasSuccessfulFleeDisplacement() const;
+	int32 GetSuccessfulFleeMemberCount() const;
 	void SubmitWildlifeResolution(const FString& OutcomeReason);
 	void ResetFleeTracking();
 	void ClearFleeResolutionTimer();

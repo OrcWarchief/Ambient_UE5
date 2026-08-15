@@ -933,41 +933,72 @@ void AAEDWildlifeEncounter::ResolveWildlifeFlee()
 	{
 		return;
 	}
+	
+	const int32 SafeMemberCount = FMath::Clamp(WildlifeMemberCount, 1, 8);
+	const int32 RequiredSuccessfulMemberCount = FMath::Clamp(MinimumSuccessfulFleeMemberCount, 1, SafeMemberCount);
+	const int32 SuccessfulMemberCount = GetSuccessfulFleeMemberCount();
 
-	if (!HasSuccessfulFleeDisplacement())
+	if (SuccessfulMemberCount < RequiredSuccessfulMemberCount)
 	{
-		PrintWildlifeDebug(TEXT("Flee failed | No accepted member moved the required distance"), true);
-		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+		PrintWildlifeDebug(
+			FString::Printf(
+				TEXT(
+					"Flee failed | Moved=%d/%d | "
+					"Required=%d"
+				),
+				SuccessfulMemberCount,
+				SpawnedWildlifeMembers.Num(),
+				RequiredSuccessfulMemberCount
+			),
+			true
+		);
 
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
 		return;
 	}
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT(
+				"Flee succeeded | Moved=%d/%d | "
+				"Required=%d"
+			),
+			SuccessfulMemberCount,
+			SpawnedWildlifeMembers.Num(),
+			RequiredSuccessfulMemberCount
+		),
+		false
+	);
 
 	SubmitWildlifeResolution(TEXT("Fled from rider"));
 }
 
-bool AAEDWildlifeEncounter::HasSuccessfulFleeDisplacement() const
+int32 AAEDWildlifeEncounter::GetSuccessfulFleeMemberCount() const
 {
 	const float RequiredDistance = FMath::Max(1.0f, MinimumSuccessfulFleeDisplacement);
 	const float RequiredDistanceSquared = FMath::Square(RequiredDistance);
 
+	int32 SuccessfulMemberCount = 0;
+
 	for (const TPair<TWeakObjectPtr<APawn>, FVector>& Entry : AcceptedFleeStartLocations)
 	{
-		APawn* WildlifeMember = Entry.Key.Get();
+		const APawn* WildlifeMember = Entry.Key.Get();
 
 		if (!IsValid(WildlifeMember))
 		{
 			continue;
 		}
 
-		const float DistanceSquared = FVector::DistSquared2D(Entry.Value, WildlifeMember->GetActorLocation());
+		const float DistanceSquared = FVector::DistSquared2D(
+			Entry.Value, WildlifeMember->GetActorLocation());
 
 		if (DistanceSquared >= RequiredDistanceSquared)
 		{
-			return true;
+			++SuccessfulMemberCount;
 		}
 	}
 
-	return false;
+	return SuccessfulMemberCount;
 }
 void AAEDWildlifeEncounter::SubmitWildlifeResolution(
 	const FString& OutcomeReason)
