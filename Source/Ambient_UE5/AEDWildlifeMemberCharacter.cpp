@@ -73,3 +73,12 @@ void AAEDWildlifeMemberCharacter::PrepareForAmbientFlee(float NewFleeSpeed)
 	}
 }
 
+void AAEDWildlifeMemberCharacter::SetAmbientAlerted(const bool bNewAlerted)
+{
+	bAmbientAlerted = bNewAlerted;
+}
+
+bool AAEDWildlifeMemberCharacter::IsAmbientAlerted() const
+{
+	return bAmbientAlerted;
+}

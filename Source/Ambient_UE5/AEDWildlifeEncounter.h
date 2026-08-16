@@ -97,6 +97,17 @@ protected:
 		meta = (ClampMin = "0.1", Units = "s"))
 	float FleeDurationBeforeResolution = 2.5f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Reaction",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float ReactionDelayBeforeFlee = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Reaction",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float MemberFleeStartDelayStep = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Reaction")
+	bool bUseMemberAlertReaction = false;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Wildlife|Flee",
 		meta = (ClampMin = "1.0", Units = "cm"))
 	float MinimumSuccessfulFleeDisplacement = 200.0f;
@@ -123,6 +134,9 @@ protected:
 	bool bEncounterActive = false;
 
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "AED|Wildlife|Runtime")
+	bool bReactionStarted = false;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "AED|Wildlife|Runtime")
 	bool bFleeStarted = false;
 
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "AED|Wildlife|Runtime")
@@ -138,7 +152,23 @@ private:
 	FVector GetWildlifeMemberOffset(int32 MemberIndex) const;
 	FVector CalculateFleeDirection() const;
 
+	float GetMemberFleeStartDelay(int32 MemberIndex) const;
+
+	void SetWildlifeMemberAlerted(APawn* WildlifeMember, bool bNewAlerted) const;
+	void SetAllWildlifeMembersAlerted(bool bNewAlerted) const;
+
+	void BeginWildlifeReaction();
 	void StartWildlifeFlee();
+
+	void StartWildlifeMemberFlee(
+		int32 MemberIndex,
+		FVector BaseFleeDirection,
+		float PlannedYawOffsetDegrees,
+		float PlannedDistanceScale,
+		float SearchDirectionSign
+	);
+
+	void FinalizeWildlifeFleeStartSequence();
 
 	AAIController* PrepareWildlifeMemberForFlee(APawn* WildlifeMember) const;
 
@@ -173,11 +203,19 @@ private:
 	int32 GetSuccessfulFleeMemberCount() const;
 	void SubmitWildlifeResolution(const FString& OutcomeReason);
 	void ResetFleeTracking();
+	void ClearFleeStartTimer();
+	void ClearMemberFleeStartTimers();
 	void ClearFleeResolutionTimer();
 	void DestroyWildlifeMembers();
 
 	void PrintWildlifeDebug(const FString& Message, bool bError) const;
 
+	FTimerHandle FleeStartTimerHandle;
+	TArray<FTimerHandle> MemberFleeStartTimerHandles;
 	FTimerHandle FleeResolutionTimerHandle;
+
+	int32 PendingMemberFleeStartCount = 0;
+	bool bFleeStartSequenceFinalized = false;
+
 	TMap<TWeakObjectPtr<APawn>, FVector> AcceptedFleeStartLocations;
 };

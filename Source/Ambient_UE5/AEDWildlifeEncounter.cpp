@@ -47,9 +47,13 @@ void AAEDWildlifeEncounter::InitializeAmbientEncounter_Implementation(const FAmb
 	CachedDirector = Cast<AAmbientDirector>(Context.DirectorActor);
 
 	bEncounterActive = false;
+	bReactionStarted = false;
 	bFleeStarted = false;
+	bFleeStartSequenceFinalized = false;
 	bOutcomeSubmitted = false;
 
+	ClearFleeStartTimer();
+	ClearMemberFleeStartTimers();
 	ClearFleeResolutionTimer();
 	DestroyWildlifeMembers();
 
@@ -67,9 +71,13 @@ void AAEDWildlifeEncounter::InitializeAmbientEncounter_Implementation(const FAmb
 void AAEDWildlifeEncounter::OnAmbientEncounterWaiting_Implementation()
 {
 	bEncounterActive = false;
+	bReactionStarted = false;
 	bFleeStarted = false;
+	bFleeStartSequenceFinalized = false;
 	bOutcomeSubmitted = false;
 
+	ClearFleeStartTimer();
+	ClearMemberFleeStartTimers();
 	ClearFleeResolutionTimer();
 
 	if (SpawnedWildlifeMembers.IsEmpty())
@@ -83,20 +91,23 @@ void AAEDWildlifeEncounter::OnAmbientEncounterWaiting_Implementation()
 void AAEDWildlifeEncounter::OnAmbientEncounterActivated_Implementation()
 {
 	bEncounterActive = true;
+	bReactionStarted = false;
 	bOutcomeSubmitted = false;
-	StartWildlifeFlee();
+
+	BeginWildlifeReaction();
 }
 
 void AAEDWildlifeEncounter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
 	bEncounterActive = false;
+	bReactionStarted = false;
+
+	SetAllWildlifeMembersAlerted(false);
 	ResetFleeTracking();
 
 	PrintWildlifeDebug(
 		FString::Printf(
-			TEXT(
-				"Cleanup | Reason=%s | "
-				"Members continue fleeing"),
+			TEXT("Cleanup | Reason=%s | Active flee moves continue; pending member starts cancelled"),
 			*Reason),
 		false);
 }
@@ -104,17 +115,23 @@ void AAEDWildlifeEncounter::OnAmbientEncounterCleanup_Implementation(const FStri
 void AAEDWildlifeEncounter::OnAmbientEncounterFinished_Implementation(const FString& Reason)
 {
 	bEncounterActive = false;
-	ClearFleeResolutionTimer();
+	bReactionStarted = false;
+
+	SetAllWildlifeMembersAlerted(false);
+	ResetFleeTracking();
 
 	PrintWildlifeDebug(
 		FString::Printf(
-			TEXT("Finished | Reason=%s | Destroying wildlife members"), *Reason), false);
+			TEXT("Finished | Reason=%s | Destroying wildlife members"),
+			*Reason),
+		false);
+
 	DestroyWildlifeMembers();
 }
 
 void AAEDWildlifeEncounter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	ClearFleeResolutionTimer();
+	ResetFleeTracking();
 	DestroyWildlifeMembers();
 
 	Super::EndPlay(EndPlayReason);
@@ -320,8 +337,109 @@ FVector AAEDWildlifeEncounter::CalculateFleeDirection() const
 		FVector::UpVector);
 }
 
+float AAEDWildlifeEncounter::GetMemberFleeStartDelay(int32 MemberIndex) const
+{
+	const int32 SafeMemberIndex = FMath::Max(0, MemberIndex);
+	const float SafeDelayStep = FMath::Max(0.0f, MemberFleeStartDelayStep);
+
+	return static_cast<float>(SafeMemberIndex) * SafeDelayStep;
+}
+
+void AAEDWildlifeEncounter::SetWildlifeMemberAlerted(APawn* WildlifeMember, bool bNewAlerted) const
+{
+	AAEDWildlifeMemberCharacter* AEDWildlifeMember =
+		Cast<AAEDWildlifeMemberCharacter>(WildlifeMember);
+
+	if (!IsValid(AEDWildlifeMember))
+	{
+		return;
+	}
+
+	AEDWildlifeMember->SetAmbientAlerted(bNewAlerted);
+}
+
+void AAEDWildlifeEncounter::SetAllWildlifeMembersAlerted(const bool bNewAlerted) const
+{
+	for (const TObjectPtr<APawn>& WildlifeMember : SpawnedWildlifeMembers)
+	{
+		SetWildlifeMemberAlerted(WildlifeMember, bNewAlerted);
+	}
+}
+
+void AAEDWildlifeEncounter::BeginWildlifeReaction()
+{
+	if (bReactionStarted || bFleeStarted || bOutcomeSubmitted || !bEncounterActive)
+	{
+		return;
+	}
+
+	bReactionStarted = true;
+
+	if (bUseMemberAlertReaction)
+	{
+		SetAllWildlifeMembersAlerted(true);
+	}
+	else
+	{
+		SetAllWildlifeMembersAlerted(false);
+	}
+
+	if (StartleSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			StartleSound,
+			GetActorLocation());
+	}
+
+	const float SafeReactionDelay = FMath::Max(0.0f, ReactionDelayBeforeFlee);
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT(
+				"Reaction started | "
+				"DelayBeforeFlee=%.2f s | Members=%d"
+			),
+			SafeReactionDelay,
+			SpawnedWildlifeMembers.Num()
+		),
+		false
+	);
+
+	if (SafeReactionDelay <= KINDA_SMALL_NUMBER)
+	{
+		StartWildlifeFlee();
+		return;
+	}
+
+	if (!GetWorld())
+	{
+		PrintWildlifeDebug(
+			TEXT(
+				"Reaction timer unavailable because World is invalid; "
+				"starting flee immediately"
+			),
+			true
+		);
+
+		StartWildlifeFlee();
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(
+		FleeStartTimerHandle,
+		this,
+		&AAEDWildlifeEncounter::StartWildlifeFlee,
+		SafeReactionDelay,
+		false
+	);
+}
+
 void AAEDWildlifeEncounter::StartWildlifeFlee()
 {
+	ClearFleeStartTimer();
+	ClearMemberFleeStartTimers();
+
 	if (bFleeStarted || bOutcomeSubmitted || !bEncounterActive)
 	{
 		return;
@@ -332,7 +450,18 @@ void AAEDWildlifeEncounter::StartWildlifeFlee()
 		SpawnWildlifeMembers();
 	}
 
+	if (SpawnedWildlifeMembers.IsEmpty())
+	{
+		PrintWildlifeDebug(TEXT("Flee failed | No wildlife members are available"), true);
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+
+		return;
+	}
+
 	bFleeStarted = true;
+	bFleeStartSequenceFinalized = false;
+
+	AcceptedFleeStartLocations.Reset();
 
 	const FVector BaseFleeDirection = CalculateFleeDirection().GetSafeNormal2D();
 	const float SearchDirectionSign = FMath::RandBool() ? 1.0f : -1.0f;
@@ -346,72 +475,192 @@ void AAEDWildlifeEncounter::StartWildlifeFlee()
 		PlannedYawOffsetDegrees,
 		PlannedDistanceScale);
 
-	AcceptedFleeStartLocations.Reset();
+	const int32 MemberCount = SpawnedWildlifeMembers.Num();
 
-	for (int32 MemberIndex = 0; MemberIndex < SpawnedWildlifeMembers.Num(); ++MemberIndex)
-	{
-		APawn* WildlifeMember = SpawnedWildlifeMembers[MemberIndex];
+	PendingMemberFleeStartCount = MemberCount;
+	MemberFleeStartTimerHandles.SetNum(MemberCount);
 
-		const FVector StartLocation =
-			IsValid(WildlifeMember)
-			? WildlifeMember->GetActorLocation()
-			: FVector::ZeroVector;
-
-		if (IssueFleeMove(
-			WildlifeMember,
-			MemberIndex,
-			BaseFleeDirection,
-			PlannedYawOffsetDegrees,
-			PlannedDistanceScale,
-			SearchDirectionSign))
-		{
-			AcceptedFleeStartLocations.Add(TWeakObjectPtr<APawn>(WildlifeMember), StartLocation);
-		}
-	}
-
-	if (StartleSound)
-	{
-		UGameplayStatics::PlaySoundAtLocation(
-			this,
-			StartleSound,
-			GetActorLocation());
-	}
-
-	const int32 SuccessfulMoveRequestCount = AcceptedFleeStartLocations.Num();
-
-	if (SuccessfulMoveRequestCount == 0)
-	{
-		PrintWildlifeDebug(TEXT("Flee failed | No MoveTo request was accepted"), true);
-		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
-		return;
-	}
-
-	const float SafeResolutionDelay = FMath::Max(0.1f, FleeDurationBeforeResolution);
-
-	GetWorldTimerManager().SetTimer(
-		FleeResolutionTimerHandle,
-		this,
-		&AAEDWildlifeEncounter::ResolveWildlifeFlee,
-		SafeResolutionDelay,
-		false);
-
+	const float MaximumMemberStartDelay = GetMemberFleeStartDelay(MemberCount - 1);
 	const FVector PlannedDirection = BaseFleeDirection
 		.RotateAngleAxis(PlannedYawOffsetDegrees, FVector::UpVector)
 		.GetSafeNormal2D();
 
 	PrintWildlifeDebug(
 		FString::Printf(
-			TEXT("Flee started | MoveRequests=%d/%d | Plan=%s | YawOffset=%.0f | "
-				 "DistanceScale=%.2f | Direction=(%.2f, %.2f)"),
-			SuccessfulMoveRequestCount,
-			SpawnedWildlifeMembers.Num(),
+			TEXT("Flee sequence scheduled | Members=%d | StartDelayStep=%.2f s | MaxStartDelay=%.2f s | "
+				"Plan=%s | YawOffset=%.0f | DistanceScale=%.2f | Direction=(%.2f, %.2f)"),
+			MemberCount,
+			FMath::Max(0.0f, MemberFleeStartDelayStep),
+			MaximumMemberStartDelay,
 			bFoundFleePlan ? TEXT("Found") : TEXT("Fallback"),
 			PlannedYawOffsetDegrees,
 			PlannedDistanceScale,
 			PlannedDirection.X,
 			PlannedDirection.Y),
-		SuccessfulMoveRequestCount == 0
-	);
+		false);
+
+	UWorld* World = GetWorld();
+
+	for (int32 MemberIndex = 0; MemberIndex < MemberCount; ++MemberIndex)
+	{
+		const float MemberStartDelay = GetMemberFleeStartDelay(MemberIndex);
+
+		if (MemberStartDelay <= KINDA_SMALL_NUMBER || !IsValid(World))
+		{
+			StartWildlifeMemberFlee(
+				MemberIndex,
+				BaseFleeDirection,
+				PlannedYawOffsetDegrees,
+				PlannedDistanceScale,
+				SearchDirectionSign);
+
+			continue;
+		}
+
+		FTimerDelegate MemberStartDelegate;
+
+		MemberStartDelegate.BindUObject(
+			this,
+			&AAEDWildlifeEncounter::StartWildlifeMemberFlee,
+			MemberIndex,
+			BaseFleeDirection,
+			PlannedYawOffsetDegrees,
+			PlannedDistanceScale,
+			SearchDirectionSign);
+
+		World->GetTimerManager().SetTimer(
+			MemberFleeStartTimerHandles[MemberIndex],
+			MemberStartDelegate,
+			MemberStartDelay,
+			false);
+	}
+}
+
+void AAEDWildlifeEncounter::StartWildlifeMemberFlee(int32 MemberIndex, FVector BaseFleeDirection, 
+	float PlannedYawOffsetDegrees, float PlannedDistanceScale, float SearchDirectionSign)
+{
+	if (!bEncounterActive || bOutcomeSubmitted || !bFleeStarted)
+	{
+		return;
+	}
+
+	const float MemberStartDelay = GetMemberFleeStartDelay(MemberIndex);
+
+	bool bMoveAccepted = false;
+
+	if (SpawnedWildlifeMembers.IsValidIndex(MemberIndex))
+	{
+		APawn* WildlifeMember = SpawnedWildlifeMembers[MemberIndex];
+
+		const FVector StartLocation = IsValid(WildlifeMember)
+			? WildlifeMember->GetActorLocation()
+			: FVector::ZeroVector;
+
+		bMoveAccepted = IssueFleeMove(
+			WildlifeMember,
+			MemberIndex,
+			BaseFleeDirection,
+			PlannedYawOffsetDegrees,
+			PlannedDistanceScale,
+			SearchDirectionSign);
+
+		SetWildlifeMemberAlerted(WildlifeMember, bUseMemberAlertReaction && !bMoveAccepted);
+
+		if (bMoveAccepted && IsValid(WildlifeMember))
+		{
+			AcceptedFleeStartLocations.Add(
+				TWeakObjectPtr<APawn>(WildlifeMember),
+				StartLocation);
+		}
+	}
+	else
+	{
+		PrintWildlifeDebug(
+			FString::Printf(
+				TEXT("Member flee start failed | Invalid MemberIndex=%d"),
+				MemberIndex),
+			true);
+	}
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT("Member flee start | Index=%d | Delay=%.2f s | Actor=%s | MoveAccepted=%s"),
+			MemberIndex,
+			MemberStartDelay,
+			SpawnedWildlifeMembers.IsValidIndex(MemberIndex)
+			? *GetNameSafe(SpawnedWildlifeMembers[MemberIndex])
+			: TEXT("Invalid"),
+			bMoveAccepted ? TEXT("Yes") : TEXT("No")),
+		!bMoveAccepted);
+
+	PendingMemberFleeStartCount = FMath::Max(0, PendingMemberFleeStartCount - 1);
+
+	if (PendingMemberFleeStartCount == 0)
+	{
+		FinalizeWildlifeFleeStartSequence();
+	}
+}
+
+void AAEDWildlifeEncounter::FinalizeWildlifeFleeStartSequence()
+{
+	if (bFleeStartSequenceFinalized || !bEncounterActive || bOutcomeSubmitted)
+	{
+		return;
+	}
+
+	bFleeStartSequenceFinalized = true;
+
+	MemberFleeStartTimerHandles.Reset();
+
+	const int32 SuccessfulMoveRequestCount = AcceptedFleeStartLocations.Num();
+	const int32 SafeMemberCount = FMath::Clamp(WildlifeMemberCount, 1, 8);
+	const int32 RequiredMoveRequestCount = FMath::Clamp(
+		MinimumSuccessfulFleeMemberCount,
+		1,
+		SafeMemberCount);
+
+	if (SuccessfulMoveRequestCount < RequiredMoveRequestCount)
+	{
+		PrintWildlifeDebug(
+			FString::Printf(
+				TEXT("Flee start sequence failed | MoveRequests=%d/%d | Required=%d"),
+				SuccessfulMoveRequestCount,
+				SpawnedWildlifeMembers.Num(),
+				RequiredMoveRequestCount),
+			true);
+
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+
+		return;
+	}
+
+	UWorld* World = GetWorld();
+
+	if (!IsValid(World))
+	{
+		PrintWildlifeDebug(TEXT("Flee start sequence failed | World became invalid"), true);
+		SubmitWildlifeResolution(TEXT("Wildlife failed to flee"));
+
+		return;
+	}
+
+	const float SafeResolutionDelay = FMath::Max(0.1f, FleeDurationBeforeResolution);
+
+	World->GetTimerManager().SetTimer(
+		FleeResolutionTimerHandle,
+		this,
+		&AAEDWildlifeEncounter::ResolveWildlifeFlee,
+		SafeResolutionDelay,
+		false);
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT("Flee start sequence complete | MoveRequests=%d/%d | Required=%d | ResolutionIn=%.2f s"),
+			SuccessfulMoveRequestCount,
+			SpawnedWildlifeMembers.Num(),
+			RequiredMoveRequestCount,
+			SafeResolutionDelay),
+		false);
 }
 
 AAIController* AAEDWildlifeEncounter::PrepareWildlifeMemberForFlee(APawn* WildlifeMember) const
@@ -1053,8 +1302,35 @@ void AAEDWildlifeEncounter::SubmitWildlifeResolution(
 
 void AAEDWildlifeEncounter::ResetFleeTracking()
 {
+	ClearFleeStartTimer();
+	ClearMemberFleeStartTimers();
 	ClearFleeResolutionTimer();
+
+	bFleeStartSequenceFinalized = false;
+
 	AcceptedFleeStartLocations.Reset();
+}
+
+void AAEDWildlifeEncounter::ClearFleeStartTimer()
+{
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(FleeStartTimerHandle);
+	}
+}
+
+void AAEDWildlifeEncounter::ClearMemberFleeStartTimers()
+{
+	if (UWorld* World = GetWorld())
+	{
+		for (FTimerHandle& TimerHandle : MemberFleeStartTimerHandles)
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+	}
+
+	MemberFleeStartTimerHandles.Reset();
+	PendingMemberFleeStartCount = 0;
 }
 
 void AAEDWildlifeEncounter::ClearFleeResolutionTimer()
@@ -1073,6 +1349,8 @@ void AAEDWildlifeEncounter::DestroyWildlifeMembers()
 		{
 			continue;
 		}
+
+		SetWildlifeMemberAlerted(WildlifeMember, false);
 
 		if (AAIController* AIController =
 				Cast<AAIController>(WildlifeMember->GetController()))
