@@ -34,6 +34,8 @@ AAEDCampHorseEncounter::AAEDCampHorseEncounter()
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
+	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AAEDCampHorseEncounter::HandleInteractionRangeBeginOverlap);
+	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AAEDCampHorseEncounter::HandleInteractionRangeEndOverlap);
 
 	InteractionPrompt = CreateDefaultSubobject<UTextRenderComponent>(TEXT("IntearctionPrompt"));
 	InteractionPrompt->SetupAttachment(SceneRoot);
@@ -452,7 +454,19 @@ void AAEDCampHorseEncounter::HandleActiveVoiceFinished()
 		RefreshInteractionAvailability();
 
 		PrintDebugMessage(
-			TEXT("Arrival bark completed | Sarah interaction is now available"),
+			FString::Printf(
+				TEXT(
+					"Arrival bark completed | "
+					"InsideInteractionRange=%s | "
+					"InteractionAvailable=%s"
+				),
+				bPlayerInsideInteractionRange
+				? TEXT("Yes")
+				: TEXT("No"),
+				CanPlayerInteract()
+				? TEXT("Yes")
+				: TEXT("No")
+			),
 			false
 		);
 		break;

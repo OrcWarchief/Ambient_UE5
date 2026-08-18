@@ -355,7 +355,9 @@ private:
 
 	bool ShouldDrawRuntimeDebug() const;
 
-	bool HasRecentlyFinishedEncounter(FName EncounterId) const;
+	bool HasFinishedEncounter(FName EncounterId) const;
+
+	bool WasMostRecentlyFinishedEncounter(FName EncounterId) const;
 
 	void EvaluatePrototypeEncounterCondition();
 

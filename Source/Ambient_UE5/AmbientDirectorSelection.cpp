@@ -250,42 +250,27 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	}
 
 	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(
-		Definition.EncounterPointSearchRadius,
-		MaximumSpawnDistance
-	);
+	const float MaxDistance = FMath::Min(Definition.EncounterPointSearchRadius, MaximumSpawnDistance);
 
 	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
-	const float DistanceAlpha = FMath::Clamp(
-		(DistanceToLocation - MinDistance) / DistanceRange,
-		0.0f,
-		1.0f
-	);
+	const float DistanceAlpha = FMath::Clamp((DistanceToLocation - MinDistance) / DistanceRange, 0.0f, 1.0f);
 
 	// 가까울수록 보너스
-	const float DistanceBonus = (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
+	const float DistanceBonus				= (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
+	const bool bWasMostRecentlyCompleted	= WasMostRecentlyFinishedEncounter(Definition.EncounterId);
+	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.RecentlyCompletedPenalty : 0.0f;
+	const float FinalScore					= Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
 
-	const bool bRecentlyCompleted =
-		HasRecentlyFinishedEncounter(Definition.EncounterId);
+	OutDebugEntry.bAccepted			= true;
+	OutDebugEntry.Score				= FinalScore;
+	OutDebugEntry.DistanceToPoint	= DistanceToLocation;
+	OutDebugEntry.SelectedLocation	= OutSpawnTransform.GetLocation();
+	OutDebugEntry.LocationReason	= LocationReason;
 
-	// 최근에 했으면 마이너스
-	const float HistoryPenalty = bRecentlyCompleted
-		? Definition.RecentlyCompletedPenalty
-		: 0.0f;
-
-	const float FinalScore =
-		Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
-
-	OutDebugEntry.bAccepted = true;
-	OutDebugEntry.Score = FinalScore;
-	OutDebugEntry.DistanceToPoint = DistanceToLocation;
-	OutDebugEntry.SelectedLocation = OutSpawnTransform.GetLocation();
-	OutDebugEntry.LocationReason = LocationReason;
-
-	CurrentWorldState.bPacingAllowsNewEncounter = true;
-	CurrentWorldState.PacingBlockReason = TEXT("Pacing passed");
-	CurrentWorldState.GlobalPacingRemaining = GlobalPacingRemaining;
-	CurrentWorldState.NearestRecentEncounterDistance = NearestHistoryDistance;
+	CurrentWorldState.bPacingAllowsNewEncounter			= true;
+	CurrentWorldState.PacingBlockReason					= TEXT("Pacing passed");
+	CurrentWorldState.GlobalPacingRemaining				= GlobalPacingRemaining;
+	CurrentWorldState.NearestRecentEncounterDistance	= NearestHistoryDistance;
 
 	if (IsValid(OutBestPoint))
 	{
@@ -321,7 +306,7 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		return false;
 	}
 
-	if (Definition.bOneShotPerHistory && HasRecentlyFinishedEncounter(Definition.EncounterId))
+	if (Definition.bOneShotPerHistory && HasFinishedEncounter(Definition.EncounterId))
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: one-shot definition %s has already been completed"),
@@ -389,20 +374,27 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 	return true;
 }
 
-bool AAmbientDirector::HasRecentlyFinishedEncounter(FName EncounterId) const
+bool AAmbientDirector::HasFinishedEncounter(const FName EncounterId) const
 {
 	if (EncounterId == NAME_None)
 	{
 		return false;
 	}
 
-	for (const FAmbientEncounterHistoryEntry& HistoryEntry : PrototypeEncounterHistory)
-	{
-		if (HistoryEntry.EncounterId == EncounterId)
+	return PrototypeEncounterHistory.ContainsByPredicate(
+		[EncounterId](const FAmbientEncounterHistoryEntry& HistoryEntry)
 		{
-			return true;
+			return HistoryEntry.EncounterId == EncounterId;
 		}
+	);
+}
+
+bool AAmbientDirector::WasMostRecentlyFinishedEncounter(const FName EncounterId) const
+{
+	if (EncounterId == NAME_None || PrototypeEncounterHistory.Num() == 0)
+	{
+		return false;
 	}
 
-	return false;
+	return PrototypeEncounterHistory[0].EncounterId == EncounterId;
 }

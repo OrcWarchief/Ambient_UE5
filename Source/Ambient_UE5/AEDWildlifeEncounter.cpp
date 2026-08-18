@@ -384,6 +384,44 @@ void AAEDWildlifeEncounter::BeginWildlifeReaction()
 		SetAllWildlifeMembersAlerted(false);
 	}
 
+	// debug
+	int32 CompatibleMemberCount = 0;
+	int32 AlertedMemberCount = 0;
+
+	for (const TObjectPtr<APawn>& WildlifeMember : SpawnedWildlifeMembers)
+	{
+		const AAEDWildlifeMemberCharacter* AEDWildlifeMember =
+			Cast<AAEDWildlifeMemberCharacter>(WildlifeMember);
+
+		if (!IsValid(AEDWildlifeMember))
+		{
+			continue;
+		}
+
+		++CompatibleMemberCount;
+
+		if (AEDWildlifeMember->IsAmbientAlerted())
+		{
+			++AlertedMemberCount;
+		}
+	}
+	// debug
+
+	PrintWildlifeDebug(
+		FString::Printf(
+			TEXT(
+				"Reaction alert state | "
+				"UseAlert=%s | Compatible=%d/%d | Alerted=%d/%d"
+			),
+			bUseMemberAlertReaction ? TEXT("Yes") : TEXT("No"),
+			CompatibleMemberCount,
+			SpawnedWildlifeMembers.Num(),
+			AlertedMemberCount,
+			SpawnedWildlifeMembers.Num()
+		),
+		false
+	);
+
 	if (StartleSound)
 	{
 		UGameplayStatics::PlaySoundAtLocation(
@@ -564,7 +602,14 @@ void AAEDWildlifeEncounter::StartWildlifeMemberFlee(int32 MemberIndex, FVector B
 			PlannedDistanceScale,
 			SearchDirectionSign);
 
-		SetWildlifeMemberAlerted(WildlifeMember, bUseMemberAlertReaction && !bMoveAccepted);
+		if (bMoveAccepted)
+		{
+			SetWildlifeMemberAlerted(WildlifeMember, false);
+		}
+		else
+		{
+			SetWildlifeMemberAlerted(WildlifeMember, bUseMemberAlertReaction);
+		}
 
 		if (bMoveAccepted && IsValid(WildlifeMember))
 		{

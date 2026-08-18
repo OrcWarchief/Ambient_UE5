@@ -20,3 +20,15 @@ Thumbs.db
 
 # Licensed Fab content; installed locally and not redistributed
 Content/HorseStarterKit/
+# Licensed third-party Adventure Pack; installed locally only
+Content/Adventure_Pack/
+Content/Adventures_Pack/
+Content/ForestAnimalsPack/
+Content/IdaFaber/
+Content/MedCastle/
+Content/Medieval_Environment/
+Content/__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/
+Content/__ExternalObjects__/ThirdPerson/Maps/ThirdPersonMap/
+
+# Locally generated merged third-party mesh
+Content/Game/SM_MERGED_StaticMeshActor_8.uasset
