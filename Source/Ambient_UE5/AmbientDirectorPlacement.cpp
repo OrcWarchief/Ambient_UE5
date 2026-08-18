@@ -215,6 +215,13 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 	FEnvQueryRequest QueryRequest(Definition.LocationQuery, PlayerPawn);
 
+	EEnvQueryRunMode::Type QueryRunMode = Definition.EQSRunMode.GetValue();
+
+	if (Definition.bValidateEQSLocationWithDirectorRules)
+	{
+		QueryRunMode = EEnvQueryRunMode::AllMatching;
+	}
+
 	const TSharedPtr<FEnvQueryResult> QueryResult =
 		QueryManager->RunInstantQuery(
 			QueryRequest,
@@ -233,69 +240,124 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 		return false;
 	}
 
-	const FVector RawEQSLocation = QueryResult->GetItemAsLocation(0);
+	constexpr int32 MaxCandidateChecks = 8;
+	const int32 TotalCandidateCount = QueryResult->Items.Num();
+	const int32 CandidateCount = FMath::Min(TotalCandidateCount, MaxCandidateChecks);
 
-	FVector FinalLocation = RawEQSLocation;
-	FString ValidationReason = TEXT("EQS location accepted without Director Validation");
+	const bool bHasClearanceOverride = Definition.EQSClearanceRadiusOverride > 0.0f;
 
-	if (Definition.bValidateEQSLocationWithDirectorRules)
+	const float EffectiveClearanceRadius =
+		FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
+
+	FString FirstValidationFailure;
+	FString LastValidationFailure;
+
+	for (int32 ItemIndex = 0; ItemIndex < CandidateCount; ++ItemIndex)
 	{
-		if (!ValidateEQSLocationCandidate(RawEQSLocation, PlayerPawn, FinalLocation, ValidationReason))
+		const FVector RawEQSLocation = QueryResult->GetItemAsLocation(ItemIndex);
+		FVector FinalLocation = RawEQSLocation;
+
+		FString ValidationReason = TEXT("EQS location accepted without Director validation");
+
+		if (Definition.bValidateEQSLocationWithDirectorRules)
 		{
-			OutReason = FString::Printf(
-				TEXT("Rejected: EQS location failed Director validation | Reason=%s"),
+			const bool bLocationPassedValidation =
+				ValidateEQSLocationCandidate(
+					RawEQSLocation,
+					PlayerPawn,
+					EffectiveClearanceRadius,
+					FinalLocation,
+					ValidationReason
+				);
+
+			if (!bLocationPassedValidation)
+			{
+				const FString IndexedFailureReason =
+					FString::Printf(TEXT("Item %d: %s"), ItemIndex + 1, *ValidationReason);
+
+				if (FirstValidationFailure.IsEmpty())
+				{
+					FirstValidationFailure = IndexedFailureReason;
+				}
+
+				LastValidationFailure = IndexedFailureReason;
+
+				continue;
+			}
+		}
+
+		FVector ToPlayer = CurrentWorldState.PlayerLocation - FinalLocation;
+		ToPlayer.Z = 0.0f;
+
+		const FRotator SpawnRotation =
+			ToPlayer.IsNearlyZero()
+			? FRotator::ZeroRotator
+			: ToPlayer.Rotation();
+
+		const float AutomaticHeightOffset = GetAutomaticEQSSpawnHeightOffset(Definition);
+		const FVector ActorSpawnLocation = FinalLocation + FVector::UpVector * AutomaticHeightOffset;
+
+		OutSpawnTransform = FTransform(SpawnRotation, ActorSpawnLocation, FVector::OneVector);
+		OutDistanceToLocation = FVector::Dist2D(CurrentWorldState.PlayerLocation, FinalLocation);
+
+		OutReason =
+			FString::Printf(
+				TEXT(
+					"EQS accepted | "
+					"Item=%d/%d TotalItems=%d | "
+					"Raw=(X=%.0f Y=%.0f Z=%.0f) "
+					"Ground=(X=%.0f Y=%.0f Z=%.0f) "
+					"Spawn=(X=%.0f Y=%.0f Z=%.0f) "
+					"HeightOffset=%.0f "
+					"Distance=%.0f cm | %s"
+				),
+				ItemIndex + 1,
+				CandidateCount,
+				TotalCandidateCount,
+
+				RawEQSLocation.X,
+				RawEQSLocation.Y,
+				RawEQSLocation.Z,
+
+				FinalLocation.X,
+				FinalLocation.Y,
+				FinalLocation.Z,
+
+				ActorSpawnLocation.X,
+				ActorSpawnLocation.Y,
+				ActorSpawnLocation.Z,
+
+				AutomaticHeightOffset,
+				OutDistanceToLocation,
 				*ValidationReason
 			);
-			return false;
-		}
+
+		return true;
 	}
+	OutReason =
+		FString::Printf(
+			TEXT(
+				"Rejected: all %d checked EQS locations "
+				"failed Director validation | "
+				"TotalItems=%d | First=%s | Last=%s"
+			),
+			CandidateCount,
+			TotalCandidateCount,
+			FirstValidationFailure.IsEmpty()
+			? TEXT("None")
+			: *FirstValidationFailure,
+			LastValidationFailure.IsEmpty()
+			? TEXT("None")
+			: *LastValidationFailure
+		);
 
-	FVector ToPlayer = CurrentWorldState.PlayerLocation - FinalLocation;
-	ToPlayer.Z = 0.0f;
-
-	const FRotator SpawnRotation =
-		ToPlayer.IsNearlyZero()
-		? FRotator::ZeroRotator
-		: ToPlayer.Rotation();
-
-	const float AutomaticHeightOffset = GetAutomaticEQSSpawnHeightOffset(Definition);
-	const FVector ActorSpawnLocation = FinalLocation + FVector::UpVector * AutomaticHeightOffset;
-
-	OutSpawnTransform = FTransform(SpawnRotation, ActorSpawnLocation, FVector::OneVector);
-	OutDistanceToLocation = FVector::Dist2D(CurrentWorldState.PlayerLocation, FinalLocation);
-
-	OutReason = FString::Printf(
-		TEXT(
-			"EQS accepted | "
-			"Raw=(X=%.0f Y=%.0f Z=%.0f) "
-			"Ground=(X=%.0f Y=%.0f Z=%.0f) "
-			"Spawn=(X=%.0f Y=%.0f Z=%.0f) "
-			"HeightOffset=%.0f "
-			"Distance=%.0f cm | %s"
-		),
-		RawEQSLocation.X,
-		RawEQSLocation.Y,
-		RawEQSLocation.Z,
-
-		FinalLocation.X,
-		FinalLocation.Y,
-		FinalLocation.Z,
-
-		ActorSpawnLocation.X,
-		ActorSpawnLocation.Y,
-		ActorSpawnLocation.Z,
-
-		AutomaticHeightOffset,
-		OutDistanceToLocation,
-		*ValidationReason
-	);
-
-	return true;
+	return false;
 }
 
 bool AAmbientDirector::ValidateEQSLocationCandidate(
 	const FVector& RawLocation,
 	const APawn* PlayerPawn,
+	float ClearanceRadius,
 	FVector& OutValidatedLocation,
 	FString& OutReason
 ) const
@@ -309,6 +371,7 @@ bool AAmbientDirector::ValidateEQSLocationCandidate(
 		return false;
 	}
 
+	const float SafeClearanceRadius = FMath::Max(1.0f, ClearanceRadius);
 	FVector GroundLocation = FVector::ZeroVector;
 	FHitResult GroundHit;
 
@@ -365,7 +428,7 @@ bool AAmbientDirector::ValidateEQSLocationCandidate(
 
 	FHitResult AreaBlockHit;
 
-	if (IsCandidateAreaBlocked(PlayerPawn, GroundLocation, AreaBlockHit))
+	if (IsCandidateAreaBlocked(PlayerPawn, GroundLocation, SafeClearanceRadius, AreaBlockHit))
 	{
 		OutReason = FString::Printf(
 			TEXT("EQS location area occupied: %s"),
@@ -377,9 +440,8 @@ bool AAmbientDirector::ValidateEQSLocationCandidate(
 	OutValidatedLocation = GroundLocation;
 
 	OutReason = FString::Printf(
-		TEXT("Director validation passed | Grounded=true Dist=%.0f"),
-		Distance2D
-	);
+		TEXT("Director validation passed | Grounded=true Dist=%.0f ClearanceRadius=%.0f cm"),
+		Distance2D, SafeClearanceRadius);
 
 	return true;
 }
@@ -498,7 +560,7 @@ bool AAmbientDirector::IsPathToCandidateBlocked(
 	return bBlocked && OutBlockHit.bBlockingHit;
 }
 
-bool AAmbientDirector::IsCandidateAreaBlocked(const APawn* PlayerPawn, const FVector& GroundLocation, FHitResult& OutBlockHit) const
+bool AAmbientDirector::IsCandidateAreaBlocked(const APawn* PlayerPawn, const FVector& GroundLocation, float ClearanceRadius, FHitResult& OutBlockHit) const
 {
 	UWorld* World = GetWorld();
 
@@ -507,11 +569,13 @@ bool AAmbientDirector::IsCandidateAreaBlocked(const APawn* PlayerPawn, const FVe
 		return false;
 	}
 
-	const FVector SweepStart = GroundLocation + FVector::UpVector * (CandidateClearanceRadius + 5.0f);
+	const float SafeClearanceRadius = FMath::Max(1.0f, ClearanceRadius);
+	constexpr float GroundSeparationPadding = 5.0f;
 
+	const FVector SweepStart = GroundLocation + FVector::UpVector * (SafeClearanceRadius + GroundSeparationPadding);
 	const FVector SweepEnd = SweepStart + FVector::UpVector * 1.0f;
 
-	const FCollisionShape SweepShape = FCollisionShape::MakeSphere(CandidateClearanceRadius);
+	const FCollisionShape SweepShape = FCollisionShape::MakeSphere(SafeClearanceRadius);
 
 	FCollisionQueryParams QueryParams;
 	QueryParams.bTraceComplex = false;

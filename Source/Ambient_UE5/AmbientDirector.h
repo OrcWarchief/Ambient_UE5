@@ -298,6 +298,7 @@ private:
 	bool ValidateEQSLocationCandidate(
 		const FVector& RawLocation,
 		const APawn* PlayerPawn,
+		float ClearanceRadius,
 		FVector& OutValidatedLocation,
 		FString& OutReason
 	) const;
@@ -380,6 +381,7 @@ private:
 	bool IsCandidateAreaBlocked(
 		const APawn* PlayerPawn,
 		const FVector& GroundLocation,
+		float ClearanceRadius,
 		FHitResult& OutBlockHit
 	) const;
 

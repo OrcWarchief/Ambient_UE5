@@ -71,6 +71,10 @@ struct FAmbientEncounterDefinition
 		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
 	bool bValidateEQSLocationWithDirectorRules = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location",
+		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides, ClampMin = "-1.0", UIMin = "-1.0", Units = "cm"))
+	float EQSClearanceRadiusOverride = -1.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection", meta = (ClampMin = "0.0"))
 	float BaseSelectionScore = 100.0f;
 

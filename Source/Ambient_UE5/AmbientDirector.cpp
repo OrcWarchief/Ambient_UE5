@@ -551,18 +551,26 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 		if (Remaining <= 0.0f)
 		{
 			PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-			PrototypeCooldownEndTimeSeconds = 0.0f;
 			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 			bHasRuntimeEncounterDefinition = false;
 
-			CurrentWorldState.PrototypeEncounterRuntimeReason =
-				TEXT("Cooldown complete; returning to Waiting");
-			
-			if (bAutoSaveDirectorStateOnRuntimeChange)
+			// 이 틱에서 이미 선택된 Winner를 바로 고정하고 스폰
+			if (bHasSelectedEncounterDefinition && bHasSelectedEncounterSpawnTransform)
 			{
-				SaveDirectorStateToSlot();
+				if (!TrySpawnOrUpdatePrototypeEncounter())
+				{
+					CurrentWorldState.PrototypeEncounterRuntimeReason =
+						TEXT("Cooldown complete, but selected encounter failed to spawn");
+					break;
+				}
+
+				CurrentWorldState.PrototypeEncounterRuntimeReason =
+					TEXT("Cooldown complete; selected encounter spawned");
+				break;
 			}
 
+			CurrentWorldState.PrototypeEncounterRuntimeReason =
+				TEXT("Cooldown complete; returning to Waiting");
 			break;
 		}
 
