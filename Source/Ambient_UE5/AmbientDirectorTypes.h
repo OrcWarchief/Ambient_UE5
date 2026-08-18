@@ -97,33 +97,6 @@ struct FAmbientWorldState
 	FGameplayTagContainer WorldTags;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bHasCandidateLocation = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FVector RawCandidateLocation = FVector::ZeroVector;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FVector CandidateLocation = FVector::ZeroVector;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float RequestedCandidateDistance = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float UsedCandidateDistance = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float CandidateDistance2D = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bCandidateProjectedToGround = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bCandidateValid = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FString CandidateRejectReason = TEXT("No candidate evaluated");
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bHasSelectedEncounterPoint = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")

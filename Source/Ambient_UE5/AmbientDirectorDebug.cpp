@@ -1,7 +1,6 @@
 #include "AmbientDirector.h"
 
 #include "Ambient_UE5.h"
-#include "AmbientCandidateMarker.h"
 #include "AmbientEncounterPoint.h"
 #include "AmbientRegionVolume.h"
 #include "Components/BoxComponent.h"
@@ -19,61 +18,20 @@ void AAmbientDirector::PrintWorldStateDebug() const
 
 	FString Message;
 
-	if (CurrentWorldState.bHasPlayerPawn && CurrentWorldState.bHasCandidateLocation)
-	{
-		const auto State = CurrentWorldState;
-
-		const FString CandidateStatus = CurrentWorldState.bCandidateValid
-			? TEXT("ACCEPTED")
-			: TEXT("REJECTED");
-
-		const FString MarkerStatus = IsValid(ActiveCandidateMarker)
-			? TEXT("Spawned")
-			: TEXT("None");
-
-		const FString RegionNameString = CurrentWorldState.bHasCurrentRegion
-			? CurrentWorldState.CurrentRegionName.ToString()
-			: TEXT("None");
-
-		const FString SummaryLine = FString::Printf(
-			TEXT("[AD] Candidate %s | Region=%s | Time=%.1fs | Marker=%s | Reason=%s"),
-			*CandidateStatus,
-			*RegionNameString,
-			State.GameTimeSeconds,
-			*MarkerStatus,
-			*State.CandidateRejectReason
-		);
-
-		const FString DetailLine = FString::Printf(
-			TEXT("     CandidateLoc=(X=%.0f Y=%.0f Z=%.0f) | PlayerLoc=(X=%.0f Y=%.0f Z=%.0f) | Speed2D=%.0f | RequestedDist=%.0f | UsedDist=%.0f | Dist2D=%.0f | Grounded=%s"),
-			State.CandidateLocation.X,
-			State.CandidateLocation.Y,
-			State.CandidateLocation.Z,
-
-			State.PlayerLocation.X,
-			State.PlayerLocation.Y,
-			State.PlayerLocation.Z,
-
-			State.PlayerSpeed2D,
-			State.RequestedCandidateDistance,
-			State.UsedCandidateDistance,
-			State.CandidateDistance2D,
-			State.bCandidateProjectedToGround ? TEXT("true") : TEXT("false")
-		);
-
-		Message = SummaryLine + LINE_TERMINATOR + DetailLine;
-	}
-	else if (CurrentWorldState.bHasPlayerPawn)
+	if (CurrentWorldState.bHasPlayerPawn)
 	{
 		const FString RegionNameString = CurrentWorldState.bHasCurrentRegion
 			? CurrentWorldState.CurrentRegionName.ToString()
 			: TEXT("None");
 
 		Message = FString::Printf(
-			TEXT("[AD] World State | Region=%s | Time=%.1fs | Player found | No candidate location | Reason=%s"),
+			TEXT("[AD] World State | Region=%s | Time=%.1fs | PlayerLoc=(X=%.0f Y=%.0f Z=%.0f) | Speed2D=%.0f"),
 			*RegionNameString,
 			CurrentWorldState.GameTimeSeconds,
-			*CurrentWorldState.CandidateRejectReason
+			CurrentWorldState.PlayerLocation.X,
+			CurrentWorldState.PlayerLocation.Y,
+			CurrentWorldState.PlayerLocation.Z,
+			CurrentWorldState.PlayerSpeed2D
 		);
 	}
 	else
@@ -87,7 +45,7 @@ void AAmbientDirector::PrintWorldStateDebug() const
 	GEngine->AddOnScreenDebugMessage(
 		1001,
 		UpdateInterval * 0.85f,
-		CurrentWorldState.bCandidateValid ? FColor::Green : FColor::Red,
+		CurrentWorldState.bHasPlayerPawn ? FColor::Green : FColor::Red,
 		Message
 	);
 
@@ -407,79 +365,6 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 	UE_LOG(LogAmbient_UE5, Log, TEXT("%s"), *Dashboard);
 }
 
-void AAmbientDirector::DrawCandidateDebug() const
-{
-	if (!CurrentWorldState.bHasCandidateLocation)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-
-	if (!World)
-	{
-		return;
-	}
-
-	const float DebugLifeTime = FMath::Max(0.05f, UpdateInterval * 0.9f);
-	const FColor CandidateColor = CurrentWorldState.bCandidateValid
-		? FColor::Green
-		: FColor::Red;
-
-	const FVector MarkerLocation = CurrentWorldState.bCandidateProjectedToGround
-		? CurrentWorldState.CandidateLocation + FVector::UpVector * CandidateDebugRadius
-		: CurrentWorldState.CandidateLocation;
-
-	DrawDebugSphere(
-		World,
-		MarkerLocation,
-		CandidateDebugRadius,
-		16,
-		CandidateColor,
-		false,
-		DebugLifeTime,
-		0,
-		2.0f
-	);
-
-	DrawDebugLine(
-		World,
-		CurrentWorldState.PlayerLocation,
-		MarkerLocation,
-		CandidateColor,
-		false,
-		DebugLifeTime,
-		0,
-		1.5f
-	);
-
-	DrawDebugSphere(
-		World,
-		CurrentWorldState.RawCandidateLocation,
-		20.0f,
-		8,
-		FColor::Yellow,
-		false,
-		DebugLifeTime,
-		0,
-		1.0f
-	);
-
-	const FString WorldLabel = CurrentWorldState.bCandidateValid
-		? TEXT("Candidate ACCEPTED")
-		: FString::Printf(TEXT("Candidate REJECTED\n%s"), *CurrentWorldState.CandidateRejectReason);
-
-	DrawDebugString(
-		World,
-		MarkerLocation + FVector::UpVector * 90.0f,
-		WorldLabel,
-		nullptr,
-		CandidateColor,
-		DebugLifeTime,
-		true
-	);
-}
-
 void AAmbientDirector::DrawRegionDebug() const
 {
 	UWorld* World = GetWorld();
@@ -786,66 +671,4 @@ void AAmbientDirector::DrawSelectedEncounterLocationDebug() const
 		DebugLifeTime,
 		true
 	);
-}
-
-void AAmbientDirector::UpdateCandidateMarker()
-{
-	const bool bShouldShowMarker =
-		bUseVisibleCandidateMarker &&
-		CurrentWorldState.bHasCandidateLocation &&
-		CurrentWorldState.bCandidateValid;
-
-	if (!bShouldShowMarker)
-	{
-		DestroyCandidateMarker();
-		return;
-	}
-
-	if (!CandidateMarkerClass)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	const FVector  MarkerLocation = CurrentWorldState.CandidateLocation;
-	const FRotator MarkerRotation = FRotator::ZeroRotator;
-
-	if (!IsValid(ActiveCandidateMarker))
-	{
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.Owner = this;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-		ActiveCandidateMarker = World->SpawnActor<AAmbientCandidateMarker>(
-			CandidateMarkerClass,
-			MarkerLocation,
-			MarkerRotation,
-			SpawnParams
-		);
-	}
-	else
-	{
-		ActiveCandidateMarker->SetActorLocation(MarkerLocation);
-		ActiveCandidateMarker->SetActorRotation(MarkerRotation);
-	}
-
-	if (IsValid(ActiveCandidateMarker))
-	{
-		ActiveCandidateMarker->SetMarkerActive(true);
-	}
-}
-
-void AAmbientDirector::DestroyCandidateMarker()
-{
-	if (IsValid(ActiveCandidateMarker))
-	{
-		ActiveCandidateMarker->Destroy();
-	}
-
-	ActiveCandidateMarker = nullptr;
 }

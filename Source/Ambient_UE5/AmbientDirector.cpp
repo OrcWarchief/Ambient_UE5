@@ -1,7 +1,6 @@
 
 #include "AmbientDirector.h"
 
-#include "AmbientCandidateMarker.h"
 #include "AmbientEncounterDefinitionData.h"
 #include "AmbientEncounterPoint.h"
 #include "AmbientEncounterRuntimeInterface.h"
@@ -18,7 +17,6 @@ AAmbientDirector::AAmbientDirector()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
-	CandidateMarkerClass = AAmbientCandidateMarker::StaticClass();
 	PrototypeEncounterDefinition.EncounterClass = AAmbientPlaceholderEncounter::StaticClass();
 }
 
@@ -142,7 +140,6 @@ void AAmbientDirector::BeginPlay()
 
 void AAmbientDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	DestroyCandidateMarker();
 	DestroyPrototypeEncounter();
 
 	if (UWorld* World = GetWorld())
@@ -201,7 +198,6 @@ void AAmbientDirector::UpdateWorldState()
 		CurrentWorldState.PlayerSpeed2D = PlayerPawn->GetVelocity().Size2D();
 
 		UpdateCurrentRegion(PlayerPawn);
-		UpdateCandidateLocation(PlayerPawn);
 		SelectEncounterDefinitionAndPoint();
 		EvaluatePrototypeEncounterCondition();
 	}
@@ -211,7 +207,6 @@ void AAmbientDirector::UpdateWorldState()
 		CurrentWorldState.PrototypeEncounterRuntimeReason	= TEXT("No player pawn");
 	}
 
-	UpdateCandidateMarker();
 	UpdatePrototypeEncounter();
 	SyncPrototypeRuntimeWorldState();
 	
@@ -220,11 +215,6 @@ void AAmbientDirector::UpdateWorldState()
 		if (bDrawRegionDebug)
 		{
 			DrawRegionDebug();
-		}
-
-		if (bDrawCandidateDebug)
-		{
-			DrawCandidateDebug();
 		}
 	}
 

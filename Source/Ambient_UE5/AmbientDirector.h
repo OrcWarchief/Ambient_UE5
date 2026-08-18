@@ -10,7 +10,6 @@
 #include "AmbientDirector.generated.h"
 
 class APawn;
-class AAmbientCandidateMarker;
 class AAmbientRegionVolume;
 class AAmbientEncounterPoint;
 class UAmbientEncounterDefinitionData;
@@ -74,9 +73,6 @@ protected:
 		EAmbientDirectorDebugVisualizationMode::Full;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
-	bool bDrawCandidateDebug = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawRegionDebug = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
@@ -88,21 +84,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawSelectedEncounterLocationDebug = true;
 
-	// ===== Debug Marker =====
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Marker")
-	bool bUseVisibleCandidateMarker = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Marker")
-	TSubclassOf<AAmbientCandidateMarker> CandidateMarkerClass;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Marker")
-	TObjectPtr<AAmbientCandidateMarker> ActiveCandidateMarker = nullptr;
-
 	// ===== Spawn Prototype =====
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
-	float CandidateDistance = 600.f;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float MinimumSpawnDistance = 500.0f;
 
@@ -123,9 +105,6 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float ObstructionCheckHeight = 90.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "10.0", Units = "cm"))
-	float CandidateDebugRadius = 50.f;
 
 	// ===== Encounter Definition =====
 
@@ -278,8 +257,6 @@ private:
 	UFUNCTION()
 	void UpdateWorldState();
 
-	void UpdateCandidateLocation(const APawn* PlayerPawn);
-
 	void UpdateCurrentRegion(const APawn* PlayerPawn);
 
 	void SelectEncounterDefinitionAndPoint();
@@ -406,14 +383,6 @@ private:
 		FHitResult& OutBlockHit
 	) const;
 
-	void RejectCandidate(const FString& Reason);
-
-	void AcceptCandidate();
-
-	void UpdateCandidateMarker();
-
-	void DestroyCandidateMarker();
-
 	FTimerHandle WorldStateTimerHandle;
 
 	void SyncTraversalWorldState();
@@ -467,8 +436,6 @@ private:
 	void PrintSelectionDebug() const;
 
 	void PrintDirectorDashboardDebug() const;
-
-	void DrawCandidateDebug() const;
 
 	void DrawRegionDebug() const;
 
