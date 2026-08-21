@@ -225,7 +225,7 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 	const TSharedPtr<FEnvQueryResult> QueryResult =
 		QueryManager->RunInstantQuery(
 			QueryRequest,
-			Definition.EQSRunMode.GetValue()
+			QueryRunMode
 		);
 
 	if (!QueryResult.IsValid())
