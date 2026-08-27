@@ -13,7 +13,7 @@ struct FAmbientDirectorSaveSnapshot
 	GENERATED_BODY()
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
-	int32 SaveVersion = 1;
+	int32 SaveVersion = 2;
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
 	float SavedAtGameTimeSeconds = 0.0f;
@@ -68,6 +68,9 @@ struct FAmbientDirectorSaveSnapshot
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
 	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;
+
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
+	TSet<FName> CompletedEncounterIds;
 };
 
 UCLASS()

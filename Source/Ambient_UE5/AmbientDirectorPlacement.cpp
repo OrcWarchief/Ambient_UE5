@@ -249,6 +249,28 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 	const float EffectiveClearanceRadius =
 		FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
 
+	const float EffectiveMinimumDistance = FMath::Max(0.0f, MinimumSpawnDistance);
+
+	const float EffectiveMaximumDistance =
+		FMath::Min(
+			FMath::Max(0.0f, Definition.EncounterPointSearchRadius),
+			FMath::Max(0.0f, MaximumSpawnDistance)
+		);
+
+	if (EffectiveMaximumDistance < EffectiveMinimumDistance)
+	{
+		OutReason = FString::Printf(
+			TEXT(
+				"Rejected: invalid EQS distance range | "
+				"Min=%.0f Max=%.0f"
+			),
+			EffectiveMinimumDistance,
+			EffectiveMaximumDistance
+		);
+
+		return false;
+	}
+
 	FString FirstValidationFailure;
 	FString LastValidationFailure;
 
@@ -265,6 +287,8 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 				ValidateEQSLocationCandidate(
 					RawEQSLocation,
 					PlayerPawn,
+					EffectiveMinimumDistance,
+					EffectiveMaximumDistance,
 					EffectiveClearanceRadius,
 					FinalLocation,
 					ValidationReason
@@ -357,6 +381,8 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 bool AAmbientDirector::ValidateEQSLocationCandidate(
 	const FVector& RawLocation,
 	const APawn* PlayerPawn,
+	float MinimumDistance,
+	float MaximumDistance,
 	float ClearanceRadius,
 	FVector& OutValidatedLocation,
 	FString& OutReason
@@ -395,22 +421,22 @@ bool AAmbientDirector::ValidateEQSLocationCandidate(
 		GroundLocation
 	);
 
-	if (Distance2D < MinimumSpawnDistance)
+	if (Distance2D < MinimumDistance)
 	{
 		OutReason = FString::Printf(
 			TEXT("EQS location too close: Dist=%.0f Min=%.0f"),
 			Distance2D,
-			MinimumSpawnDistance
+			MinimumDistance
 		);
 		return false;
 	}
 
-	if (Distance2D > MaximumSpawnDistance)
+	if (Distance2D > MaximumDistance)
 	{
 		OutReason = FString::Printf(
 			TEXT("EQS location too far: Dist=%.0f Max=%.0f"),
 			Distance2D,
-			MaximumSpawnDistance
+			MaximumDistance
 		);
 		return false;
 	}

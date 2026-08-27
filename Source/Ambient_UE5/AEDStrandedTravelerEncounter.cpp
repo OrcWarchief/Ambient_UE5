@@ -394,17 +394,11 @@ void AAEDStrandedTravelerEncounter::SubmitOutcomeAndRequestCleanup(const FString
 		return;
 	}
 
-	bOutcomeSubmitted = true;
-	UpdateInteractionPrompt();
-
 	if (!IsValid(CachedDirector))
 	{
 		PrintInteractionDebug(
 			FString::Printf(
-				TEXT(
-					"Cannot submit outcome %s: "
-					"Director is invalid"
-				),
+				TEXT("Cannot submit outcome %s: Director is invalid"),
 				*OutcomeReason
 			),
 			true
@@ -413,21 +407,23 @@ void AAEDStrandedTravelerEncounter::SubmitOutcomeAndRequestCleanup(const FString
 		return;
 	}
 
+	bOutcomeSubmitted = true;
+	UpdateInteractionPrompt();
+
 	const bool bAccepted =
-		CachedDirector->
-		RequestActiveEncounterResolution(
+		CachedDirector->RequestActiveEncounterResolution(
 			this,
 			OutcomeReason
 		);
 
 	if (!bAccepted)
 	{
+		bOutcomeSubmitted = false;
+		UpdateInteractionPrompt();
+
 		PrintInteractionDebug(
 			FString::Printf(
-				TEXT(
-					"Director rejected resolution request | "
-					"Outcome=%s"
-				),
+				TEXT("Director rejected resolution request | Outcome=%s"),
 				*OutcomeReason
 			),
 			true
@@ -438,9 +434,7 @@ void AAEDStrandedTravelerEncounter::SubmitOutcomeAndRequestCleanup(const FString
 
 	PrintInteractionDebug(
 		FString::Printf(
-			TEXT(
-				"Resolution accepted | Outcome=%s"
-			),
+			TEXT("Resolution accepted | Outcome=%s"),
 			*OutcomeReason
 		),
 		false

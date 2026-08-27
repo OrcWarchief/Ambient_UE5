@@ -508,27 +508,28 @@ void AAEDCampHorseEncounter::CompleteCampConversation()
 		return;
 	}
 
-	bConversationCompleted = true;
-
-	DisableInteractionInput();
-	UpdateInteractionPrompt();
-
-	// This event executes synchronously. The Blueprint implementation must
-	// call GrantMountPermission before control returns here.
-	BP_OnCampConversationCompleted();
-
-	if (!bMountPermissionGranted)
+	if (!GrantMountPermission())
 	{
+		bConversationStarted = false;
+		RefreshInteractionAvailability();
+
 		PrintDebugMessage(
 			TEXT(
-				"Conversation completed, but the horse is still locked | "
-				"Connect BP_OnCampConversationCompleted to GrantMountPermission"
+				"Conversation could not complete because "
+				"horse unlock failed; interaction can be retried"
 			),
 			true
 		);
 
 		return;
 	}
+
+	bConversationCompleted = true;
+
+	BP_OnCampConversationCompleted();
+
+	DisableInteractionInput();
+	UpdateInteractionPrompt();
 
 	PrintDebugMessage(
 		TEXT(

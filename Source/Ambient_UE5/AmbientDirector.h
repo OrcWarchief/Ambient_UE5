@@ -207,6 +207,9 @@ protected:
 	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	TSet<FName> CompletedEncounterIds;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	int32 PrototypeEncounterStartCount = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
@@ -298,6 +301,8 @@ private:
 	bool ValidateEQSLocationCandidate(
 		const FVector& RawLocation,
 		const APawn* PlayerPawn,
+		float MinimumDistance,
+		float MaximumDistance,
 		float ClearanceRadius,
 		FVector& OutValidatedLocation,
 		FString& OutReason
@@ -361,7 +366,7 @@ private:
 
 	void SyncPrototypeRuntimeWorldState();
 
-	float GetDistanceFromPlayerToPrototypeEncounter() const;
+	bool TryGetDistanceFromPlayerToPrototypeEncounter(float& OutDistance) const;
 
 	FString GetPrototypeRuntimeStateString() const;
 

@@ -175,115 +175,28 @@ bool AAmbientDirector::ClearDirectorSaveInternal(FString& OutReason) const
 
 void AAmbientDirector::BuildDirectorSaveSnapshot(FAmbientDirectorSaveSnapshot& OutSnapshot) const
 {
-	const float Now = CurrentWorldState.GameTimeSeconds;
+	OutSnapshot = FAmbientDirectorSaveSnapshot();
 
-	const bool bHasValidRuntimeDefinition =
-		bHasRuntimeEncounterDefinition &&
-		RuntimeEncounterDefinition.EncounterId != NAME_None;
+	OutSnapshot.SaveVersion = 2;
+	OutSnapshot.SavedAtGameTimeSeconds = CurrentWorldState.GameTimeSeconds;
 
-	const bool bActorBackedState =
-		PrototypeEncounterState == EAmbientEncounterRuntimeState::Waiting ||
-		PrototypeEncounterState == EAmbientEncounterRuntimeState::Active ||
-		PrototypeEncounterState == EAmbientEncounterRuntimeState::Cleanup;
+	OutSnapshot.RuntimeState = EAmbientEncounterRuntimeState::Waiting;
+	OutSnapshot.bHadRuntimeEncounterDefinition = false;
+	OutSnapshot.bHadRuntimeEncounterActor = false;
+	OutSnapshot.RuntimeEncounterId = NAME_None;
 
-	const bool bHasActorBackedRuntime =
-		bActorBackedState &&
-		bHasValidRuntimeDefinition &&
-		IsValid(ActivePrototypeEncounter);
-
-	const bool bHasCooldownRuntime =
-		PrototypeEncounterState == EAmbientEncounterRuntimeState::Cooldown &&
-		bHasValidRuntimeDefinition &&
-		!IsValid(ActivePrototypeEncounter);
-
-	const bool bHasPersistableRuntime =
-		bHasActorBackedRuntime || bHasCooldownRuntime;
-
-	OutSnapshot.SaveVersion = 1;
-	OutSnapshot.SavedAtGameTimeSeconds = Now;
-
-	OutSnapshot.RuntimeState = bHasPersistableRuntime
-		? PrototypeEncounterState
-		: EAmbientEncounterRuntimeState::Waiting;
-	
-	OutSnapshot.bHadRuntimeEncounterDefinition = bHasPersistableRuntime;
-	OutSnapshot.bHadRuntimeEncounterActor = bHasActorBackedRuntime;
-
-	OutSnapshot.RuntimeEncounterId = bHasPersistableRuntime
-		? RuntimeEncounterDefinition.EncounterId
-		: NAME_None;
-
-	OutSnapshot.RuntimeRegionName = bHasActorBackedRuntime
-		? RuntimeEncounterRegionName
-		: NAME_None;
-
-	OutSnapshot.RuntimePointName = bHasActorBackedRuntime
-		? RuntimeEncounterPointName
-		: NAME_None;
-
-	if (bHasActorBackedRuntime)
-	{
-		OutSnapshot.RuntimeEncounterLocation =
-			ActivePrototypeEncounter->GetActorLocation();
-
-		OutSnapshot.RuntimeEncounterRotation =
-			ActivePrototypeEncounter->GetActorRotation();
-
-		OutSnapshot.RuntimeEncounterLocationSource =
-			RuntimeEncounterLocationSource;
-	}
-	else
-	{
-		OutSnapshot.RuntimeEncounterLocation = FVector::ZeroVector;
-		OutSnapshot.RuntimeEncounterRotation = FRotator::ZeroRotator;
-		OutSnapshot.RuntimeEncounterLocationSource = TEXT("Unknown");
-	}
-
-	if (bHasActorBackedRuntime && RuntimeEncounterStartedAtTimeSeconds > 0.0f)
-	{
-		OutSnapshot.RuntimeEncounterElapsedSeconds =
-			FMath::Max(0.0f, Now - RuntimeEncounterStartedAtTimeSeconds);
-	}
-	else
-	{
-		OutSnapshot.RuntimeEncounterElapsedSeconds = 0.0f;
-	}
-
-	OutSnapshot.CleanupRemainingSeconds = 0.0f;
-	OutSnapshot.CooldownRemainingSeconds = 0.0f;
-
-	if (bHasActorBackedRuntime &&
-		PrototypeEncounterState == EAmbientEncounterRuntimeState::Cleanup)
-	{
-		OutSnapshot.CleanupRemainingSeconds =
-			FMath::Max(0.0f, PrototypeCleanupEndTimeSeconds - Now);
-	}
-
-	if (bHasCooldownRuntime)
-	{
-		OutSnapshot.CooldownRemainingSeconds =
-			FMath::Max(0.0f, PrototypeCooldownEndTimeSeconds - Now);
-	}
-
-	OutSnapshot.GlobalPacingRemainingSeconds =
-		GetGlobalPacingRemaining();
-
-	OutSnapshot.PendingFinishReason =
-		OutSnapshot.RuntimeState == EAmbientEncounterRuntimeState::Cleanup
-		? PendingPrototypeFinishReason
-		: TEXT("None");
-
+	OutSnapshot.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
 	OutSnapshot.PrototypeEncounterStartCount = PrototypeEncounterStartCount;
 	OutSnapshot.PrototypeEncounterFinishCount = PrototypeEncounterFinishCount;
 	OutSnapshot.PrototypeEncounterHistory = PrototypeEncounterHistory;
+	OutSnapshot.CompletedEncounterIds = CompletedEncounterIds;
 }
 
-bool AAmbientDirector::ApplyDirectorSaveSnapshot(
-	const FAmbientDirectorSaveSnapshot& Snapshot,
-	FString& OutReason
-)
+bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnapshot& Snapshot, FString& OutReason)
 {
-	if (Snapshot.SaveVersion != 1)
+	const bool bMigratingVersion1 = Snapshot.SaveVersion == 1;
+
+	if (!bMigratingVersion1 && Snapshot.SaveVersion != 2)
 	{
 		OutReason = FString::Printf(
 			TEXT("Unsupported save version: %d"),
@@ -292,104 +205,40 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(
 		return false;
 	}
 
-	const bool bHasDefinition = Snapshot.bHadRuntimeEncounterDefinition;
-	const bool bHadActor = Snapshot.bHadRuntimeEncounterActor;
-	const bool bHasEncounterId = Snapshot.RuntimeEncounterId != NAME_None;
-	const bool bHistoryOnly = !bHasDefinition && !bHadActor;
-
-	const bool bActorBackedState =
-		Snapshot.RuntimeState ==
-		EAmbientEncounterRuntimeState::Waiting ||
-		Snapshot.RuntimeState ==
-		EAmbientEncounterRuntimeState::Active ||
-		Snapshot.RuntimeState ==
-		EAmbientEncounterRuntimeState::Cleanup;
-
-	const bool bActorBackedSnapshot =
-		bActorBackedState &&
-		bHasDefinition &&
-		bHadActor &&
-		bHasEncounterId;
-
-	const bool bCooldownSnapshot =
-		Snapshot.RuntimeState == EAmbientEncounterRuntimeState::Cooldown &&
-		bHasDefinition &&
-		!bHadActor &&
-		bHasEncounterId;
-
-	if (!bHistoryOnly && !bActorBackedSnapshot && !bCooldownSnapshot)
-	{
-		OutReason = TEXT("Save snapshot contains an inconsistent runtime encounter");
-		return false;
-	}
-
-	if (bActorBackedSnapshot &&
-		(Snapshot.RuntimeEncounterLocation.ContainsNaN() ||
-			Snapshot.RuntimeEncounterRotation.ContainsNaN()))
-	{
-		OutReason = TEXT("Save snapshot contains an invalid runtime transform");
-		return false;
-	}
-
-	FAmbientEncounterDefinition RestoredDefinition;
-
-	if ((bActorBackedSnapshot || bCooldownSnapshot) &&
-		!TryFindEncounterDefinitionById(Snapshot.RuntimeEncounterId, RestoredDefinition))
-	{
-		OutReason = FString::Printf(
-			TEXT("Could not find encounter definition '%s'"),
-			*Snapshot.RuntimeEncounterId.ToString());
-
-		return false;
-	}
-
-	if (bActorBackedSnapshot)
-	{
-		if (!RestoredDefinition.EncounterClass)
-		{
-			OutReason = FString::Printf(
-				TEXT(
-					"Encounter definition '%s' "
-					"does not have an EncounterClass"),
-				*Snapshot.RuntimeEncounterId.ToString());
-
-			return false;
-		}
-
-		if (!RestoredDefinition.EncounterClass->ImplementsInterface(
-			UAmbientEncounterRuntimeInterface::StaticClass()))
-		{
-			OutReason = FString::Printf(
-				TEXT(
-					"Encounter class %s does not implement "
-					"AmbientEncounterRuntimeInterface"),
-				*GetNameSafe(RestoredDefinition.EncounterClass.Get()));
-
-			return false;
-		}
-
-		if (!GetWorld())
-		{
-			OutReason = TEXT("Cannot restore actor-backed snapshot: no world");
-			return false;
-		}
-	}
-
 	DestroyPrototypeEncounter();
+
 	PrototypeEncounterHistory = Snapshot.PrototypeEncounterHistory;
 	PrototypeEncounterStartCount = Snapshot.PrototypeEncounterStartCount;
 	PrototypeEncounterFinishCount = Snapshot.PrototypeEncounterFinishCount;
+	CompletedEncounterIds = Snapshot.CompletedEncounterIds;
+
+	if (bMigratingVersion1)
+	{
+		for (const FAmbientEncounterHistoryEntry& Entry : PrototypeEncounterHistory)
+		{
+			if (Entry.EncounterId != NAME_None)
+			{
+				CompletedEncounterIds.Add(Entry.EncounterId);
+			}
+		}
+	}
 
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 
-	if (Snapshot.GlobalPacingRemainingSeconds > 0.0f &&
-		MinimumSecondsBetweenEncounterStarts > 0.0f)
+	if (MinimumSecondsBetweenEncounterStarts > 0.0f)
 	{
-		LastAnyEncounterStartTimeSeconds =
-			Now - FMath::Max(
+		const float Remaining =
+			FMath::Clamp(
+				Snapshot.GlobalPacingRemainingSeconds,
 				0.0f,
-				MinimumSecondsBetweenEncounterStarts -
-				Snapshot.GlobalPacingRemainingSeconds);
+				MinimumSecondsBetweenEncounterStarts
+			);
+
+		LastAnyEncounterStartTimeSeconds =
+			Remaining > 0.0f
+			? Now -
+			(MinimumSecondsBetweenEncounterStarts - Remaining)
+			: -999999.0f;
 	}
 	else
 	{
@@ -397,7 +246,6 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(
 	}
 
 	PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-
 	RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 	bHasRuntimeEncounterDefinition = false;
 	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
@@ -410,54 +258,23 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(
 	PrototypeCooldownEndTimeSeconds = 0.0f;
 	PendingPrototypeFinishReason = TEXT("None");
 
-	if (bHistoryOnly)
-	{
-		OutReason = bHasEncounterId
-			? TEXT(
-				"Loaded snapshot as history-only; "
-				"runtime presence flags were false")
-			: TEXT(
-				"Loaded save with history only; "
-				"no runtime encounter was present");
-		return true;
-	}
+	CurrentWorldState.bHasActivePrototypeEncounter = false;
+	CurrentWorldState.DistanceToPrototypeEncounter = 0.0f;
+	CurrentWorldState.PrototypeCleanupRemaining = 0.0f;
+	CurrentWorldState.PrototypeCooldownRemaining = 0.0f;
+	CurrentWorldState.PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
 
-	RuntimeEncounterDefinition = RestoredDefinition;
-	bHasRuntimeEncounterDefinition = true;
+	OutReason = bMigratingVersion1
+		? TEXT(
+			"Loaded version 1 durable data; "
+			"transient encounter state was discarded"
+		)
+		: TEXT(
+			"Loaded durable Director state; "
+			"runtime normalized to Waiting"
+		);
 
-	if (bCooldownSnapshot)
-	{
-		if (Snapshot.CooldownRemainingSeconds > 0.0f)
-		{
-			PrototypeEncounterState = EAmbientEncounterRuntimeState::Cooldown;
-			PrototypeCooldownEndTimeSeconds = Now + Snapshot.CooldownRemainingSeconds;
-
-			OutReason = FString::Printf(
-				TEXT(
-					"Loaded cooldown state for %s "
-					"with %.1fs remaining"),
-				*Snapshot.RuntimeEncounterId.ToString(),
-				Snapshot.CooldownRemainingSeconds);
-		}
-		else
-		{
-			PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-			PrototypeCooldownEndTimeSeconds = 0.0f;
-
-			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
-			bHasRuntimeEncounterDefinition = false;
-
-			OutReason = FString::Printf(
-				TEXT(
-					"Loaded expired cooldown for %s "
-					"returning to Waiting"),
-				*Snapshot.RuntimeEncounterId.ToString());
-		}
-
-		return true;
-	}
-
-	return RestoreRuntimeEncounterFromSave(Snapshot, RestoredDefinition, OutReason);
+	return true;
 }
 
 bool AAmbientDirector::RestoreRuntimeEncounterFromSave(

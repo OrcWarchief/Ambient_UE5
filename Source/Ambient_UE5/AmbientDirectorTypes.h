@@ -193,6 +193,27 @@ struct FAmbientWorldState
 	TObjectPtr<AActor> TraversalActor = nullptr;
 };
 
+USTRUCT(BlueprintType)
+struct FAmbientPacingResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	bool bEvaluated = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	bool bPassed = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	FString Reason = TEXT("Pacing not evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	float GlobalRemaining = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Pacing")
+	float NearestHistoryDistance = 0.0f;
+};
+
 USTRUCT(BlueprintType) // debug only data
 struct FAmbientEncounterSelectionDebugEntry
 {
@@ -224,4 +245,7 @@ struct FAmbientEncounterSelectionDebugEntry
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
 	FString LocationReason = TEXT("No location evaluated");
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Selection")
+	FAmbientPacingResult PacingResult;
 };

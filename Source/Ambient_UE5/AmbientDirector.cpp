@@ -450,7 +450,14 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			}
 		}
 
-		const float DistanceToEncounter = GetDistanceFromPlayerToPrototypeEncounter();
+		float DistanceToEncounter = 0.0f;
+
+		if (!TryGetDistanceFromPlayerToPrototypeEncounter(DistanceToEncounter))
+		{
+			CurrentWorldState.PrototypeEncounterRuntimeReason =
+				TEXT("Waiting paused because player pawn is unavailable");
+			break;
+		}
 
 		if (Definition.WaitingAbandonDistance > 0.0f)
 		{
@@ -496,7 +503,14 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			break;
 		}
 
-		const float DistanceToEncounter = GetDistanceFromPlayerToPrototypeEncounter();
+		float DistanceToEncounter = 0.0f;
+
+		if (!TryGetDistanceFromPlayerToPrototypeEncounter(DistanceToEncounter))
+		{
+			CurrentWorldState.PrototypeEncounterRuntimeReason =
+				TEXT("Active encounter paused because player pawn is unavailable");
+			break;
+		}
 
 		// 플레이어가 Leave 거리 밖으로 나가면 Cleanup 진입
 		if (DistanceToEncounter >= Definition.PlayerLeaveDistance)
@@ -551,26 +565,22 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 		if (Remaining <= 0.0f)
 		{
 			PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+			PrototypeCooldownEndTimeSeconds = 0.0f;
+
 			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 			bHasRuntimeEncounterDefinition = false;
 
-			// 이 틱에서 이미 선택된 Winner를 바로 고정하고 스폰
-			if (bHasSelectedEncounterDefinition && bHasSelectedEncounterSpawnTransform)
-			{
-				if (!TrySpawnOrUpdatePrototypeEncounter())
-				{
-					CurrentWorldState.PrototypeEncounterRuntimeReason =
-						TEXT("Cooldown complete, but selected encounter failed to spawn");
-					break;
-				}
+			CurrentWorldState.PrototypeEncounterRuntimeReason =
+				TEXT(
+					"Cooldown complete; next update will "
+					"perform a fresh selection"
+				);
 
-				CurrentWorldState.PrototypeEncounterRuntimeReason =
-					TEXT("Cooldown complete; selected encounter spawned");
-				break;
+			if (bAutoSaveDirectorStateOnRuntimeChange)
+			{
+				SaveDirectorStateToSlot();
 			}
 
-			CurrentWorldState.PrototypeEncounterRuntimeReason =
-				TEXT("Cooldown complete; returning to Waiting");
 			break;
 		}
 
@@ -879,6 +889,13 @@ void AAmbientDirector::FinishPrototypeEncounter(const FString& Reason)
 		);
 	}
 
+	const FAmbientEncounterDefinition& FinishedDefinition = GetPrototypeEncounterDefinition();
+
+	if (FinishedDefinition.bOneShotPerHistory && FinishedDefinition.EncounterId != NAME_None)
+	{
+		CompletedEncounterIds.Add(FinishedDefinition.EncounterId);
+	}
+
 	AddPrototypeHistoryEntry(FinishTime, Reason);
 
 	PrototypeEncounterFinishCount++;
@@ -967,7 +984,8 @@ void AAmbientDirector::SyncPrototypeRuntimeWorldState()
 	CurrentWorldState.PrototypeEncounterState		= PrototypeEncounterState;
 	CurrentWorldState.bHasActivePrototypeEncounter	= IsValid(ActivePrototypeEncounter);
 
-	CurrentWorldState.DistanceToPrototypeEncounter	= GetDistanceFromPlayerToPrototypeEncounter();
+	CurrentWorldState.DistanceToPrototypeEncounter = 0.0f;
+	TryGetDistanceFromPlayerToPrototypeEncounter(CurrentWorldState.DistanceToPrototypeEncounter);
 
 	CurrentWorldState.PrototypeCleanupRemaining		= 0.0f;
 	CurrentWorldState.PrototypeCooldownRemaining	= 0.0f;
@@ -986,14 +1004,17 @@ void AAmbientDirector::SyncPrototypeRuntimeWorldState()
 	CurrentWorldState.PrototypeEncounterFinishCount = PrototypeEncounterFinishCount;
 }
 
-float AAmbientDirector::GetDistanceFromPlayerToPrototypeEncounter() const
+bool AAmbientDirector::TryGetDistanceFromPlayerToPrototypeEncounter(float& OutDistance) const
 {
+	OutDistance = 0.0f;
 	if (!CurrentWorldState.bHasPlayerPawn || !IsValid(ActivePrototypeEncounter))
 	{
-		return 0.0f;
+		return false;
 	}
 
-	return FVector::Dist2D(CurrentWorldState.PlayerLocation, ActivePrototypeEncounter->GetActorLocation());
+	OutDistance = FVector::Dist2D(CurrentWorldState.PlayerLocation, ActivePrototypeEncounter->GetActorLocation());
+
+	return true;
 }
 
 FString AAmbientDirector::GetPrototypeRuntimeStateString() const

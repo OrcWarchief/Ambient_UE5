@@ -41,6 +41,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	FAmbientEncounterDefinition BestDefinition;
 	FTransform BestSpawnTransform = FTransform::Identity;
 	FString BestLocationReason = TEXT("No location");
+	FAmbientPacingResult BestPacingResult;
 
 	auto EvaluateDefinition = [&](const UAmbientEncounterDefinitionData* DefinitionAsset, const FAmbientEncounterDefinition& Definition)
 		{
@@ -71,6 +72,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 				BestDefinition = Definition;
 				BestSpawnTransform = CandidateSpawnTransform;
 				BestLocationReason = DebugEntry.LocationReason;
+				BestPacingResult = DebugEntry.PacingResult;
 			}
 		};
 
@@ -159,10 +161,8 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	}
 
 	CurrentWorldState.bHasSelectedEncounterLocation = true;
-	CurrentWorldState.SelectedEncounterLocation =
-		BestSpawnTransform.GetLocation();
-	CurrentWorldState.SelectedEncounterRotation =
-		BestSpawnTransform.GetRotation().Rotator();
+	CurrentWorldState.SelectedEncounterLocation = BestSpawnTransform.GetLocation();
+	CurrentWorldState.SelectedEncounterRotation = BestSpawnTransform.GetRotation().Rotator();
 
 	CurrentWorldState.SelectedEncounterLocationSource =
 		BestDefinition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
@@ -170,6 +170,10 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 		: TEXT("AuthoredPoint");
 
 	CurrentWorldState.SelectedEncounterLocationReason = BestLocationReason;
+	CurrentWorldState.bPacingAllowsNewEncounter = BestPacingResult.bPassed;
+	CurrentWorldState.PacingBlockReason = BestPacingResult.Reason;
+	CurrentWorldState.GlobalPacingRemaining = BestPacingResult.GlobalRemaining;
+	CurrentWorldState.NearestRecentEncounterDistance = BestPacingResult.NearestHistoryDistance;
 }
 
 bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
@@ -220,31 +224,28 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 		return false;
 	}
 
-	FString PacingReason;
-	float GlobalPacingRemaining = 0.0f;
-	float NearestHistoryDistance = 0.0f;
+	FAmbientPacingResult& PacingResult = OutDebugEntry.PacingResult;
+	PacingResult.bEvaluated = true;
 
-	if (!DoesCandidatePassDirectorPacing(
-		Definition,
-		OutSpawnTransform,
-		PacingReason,
-		GlobalPacingRemaining,
-		NearestHistoryDistance
-	))
+	PacingResult.bPassed =
+		DoesCandidatePassDirectorPacing(
+			Definition,
+			OutSpawnTransform,
+			PacingResult.Reason,
+			PacingResult.GlobalRemaining,
+			PacingResult.NearestHistoryDistance
+		);
+
+	if (!PacingResult.bPassed)
 	{
 		OutDebugEntry.Reason = FString::Printf(
 			TEXT("Rejected by Director pacing: %s"),
-			*PacingReason
+			*PacingResult.Reason
 		);
 
 		OutDebugEntry.LocationReason = LocationReason;
 		OutDebugEntry.SelectedLocation = OutSpawnTransform.GetLocation();
 		OutDebugEntry.DistanceToPoint = DistanceToLocation;
-
-		CurrentWorldState.bPacingAllowsNewEncounter = false;
-		CurrentWorldState.PacingBlockReason = PacingReason;
-		CurrentWorldState.GlobalPacingRemaining = GlobalPacingRemaining;
-		CurrentWorldState.NearestRecentEncounterDistance = NearestHistoryDistance;
 
 		return false;
 	}
@@ -266,11 +267,6 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	OutDebugEntry.DistanceToPoint	= DistanceToLocation;
 	OutDebugEntry.SelectedLocation	= OutSpawnTransform.GetLocation();
 	OutDebugEntry.LocationReason	= LocationReason;
-
-	CurrentWorldState.bPacingAllowsNewEncounter			= true;
-	CurrentWorldState.PacingBlockReason					= TEXT("Pacing passed");
-	CurrentWorldState.GlobalPacingRemaining				= GlobalPacingRemaining;
-	CurrentWorldState.NearestRecentEncounterDistance	= NearestHistoryDistance;
 
 	if (IsValid(OutBestPoint))
 	{
@@ -376,17 +372,7 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 
 bool AAmbientDirector::HasFinishedEncounter(const FName EncounterId) const
 {
-	if (EncounterId == NAME_None)
-	{
-		return false;
-	}
-
-	return PrototypeEncounterHistory.ContainsByPredicate(
-		[EncounterId](const FAmbientEncounterHistoryEntry& HistoryEntry)
-		{
-			return HistoryEntry.EncounterId == EncounterId;
-		}
-	);
+	return EncounterId != NAME_None && CompletedEncounterIds.Contains(EncounterId);
 }
 
 bool AAmbientDirector::WasMostRecentlyFinishedEncounter(const FName EncounterId) const
