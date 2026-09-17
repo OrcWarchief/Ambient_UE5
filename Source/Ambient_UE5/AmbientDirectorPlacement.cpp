@@ -74,10 +74,7 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 	}
 
 	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(
-		Definition.SpawnSearchRadius,
-		MaximumSpawnDistance
-	);
+	const float MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 
 	if (MaxDistance < MinDistance)
 	{
@@ -126,7 +123,9 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 		}
 	}
 
-	if (!IsValid(BestPoint))
+	BestPoint = GetValid(BestPoint);
+
+	if (BestPoint == nullptr)
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"),
@@ -136,9 +135,9 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 		return false;
 	}
 
-	OutBestPoint = BestPoint;
-	OutDistanceToPoint = FMath::Sqrt(BestDistanceSq);
-	OutSpawnTransform = BestPoint->GetEncounterSpawnTransform();
+	OutBestPoint		= BestPoint;
+	OutDistanceToPoint	= FMath::Sqrt(BestDistanceSq);
+	OutSpawnTransform	= BestPoint->GetEncounterSpawnTransform();
 
 	OutReason = FString::Printf(
 		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
@@ -222,11 +221,7 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 		QueryRunMode = EEnvQueryRunMode::AllMatching;
 	}
 
-	const TSharedPtr<FEnvQueryResult> QueryResult =
-		QueryManager->RunInstantQuery(
-			QueryRequest,
-			QueryRunMode
-		);
+	const TSharedPtr<FEnvQueryResult> QueryResult = QueryManager->RunInstantQuery(QueryRequest, QueryRunMode);
 
 	if (!QueryResult.IsValid())
 	{
@@ -246,16 +241,9 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 	const bool bHasClearanceOverride = Definition.EQSClearanceRadiusOverride > 0.0f;
 
-	const float EffectiveClearanceRadius =
-		FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
-
+	const float EffectiveClearanceRadius = FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
 	const float EffectiveMinimumDistance = FMath::Max(0.0f, MinimumSpawnDistance);
-
-	const float EffectiveMaximumDistance =
-		FMath::Min(
-			FMath::Max(0.0f, Definition.SpawnSearchRadius),
-			FMath::Max(0.0f, MaximumSpawnDistance)
-		);
+	const float EffectiveMaximumDistance = FMath::Min(FMath::Max(0.0f, Definition.SpawnSearchRadius), FMath::Max(0.0f, MaximumSpawnDistance));
 
 	if (EffectiveMaximumDistance < EffectiveMinimumDistance)
 	{

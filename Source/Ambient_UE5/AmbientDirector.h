@@ -84,12 +84,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawSelectedEncounterLocationDebug = true;
 
-	// ===== Spawn Prototype =====
+	// ===== Spawn Encounter =====
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float MinimumSpawnDistance = 500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
-	float MaximumSpawnDistance = 1200.0f;
+	float MaximumSpawnDistance = 3800.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float GroundTraceUpDistance = 1000.0f;

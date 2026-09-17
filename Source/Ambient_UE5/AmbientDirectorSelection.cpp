@@ -122,26 +122,26 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 
 	if (IsValid(BestPoint))
 	{
-		CurrentWorldState.bHasSelectedEncounterPoint		= true;
-		CurrentWorldState.SelectedEncounterPointName		= BestPoint->GetPointName();
+		CurrentWorldState.bHasSelectedEncounterPoint = true;
+		CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
 	}
 	else
 	{
-		CurrentWorldState.bHasSelectedEncounterPoint		= false;
-		CurrentWorldState.SelectedEncounterPointName		= NAME_None;
+		CurrentWorldState.bHasSelectedEncounterPoint = false;
+		CurrentWorldState.SelectedEncounterPointName = NAME_None;
 	}
 
-	CurrentWorldState.bHasSelectedEncounterLocation = true;
+	CurrentWorldState.bHasSelectedEncounterLocation	  = true;
 	CurrentWorldState.SelectedEncounterLocationSource =
 		BestDefinition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
 		? TEXT("EQS")
 		: TEXT("AuthoredPoint");
 
-	CurrentWorldState.SelectedEncounterLocationReason = BestLocationReason;
-	CurrentWorldState.bPacingAllowsNewEncounter = BestPacingResult.bPassed;
-	CurrentWorldState.PacingBlockReason = BestPacingResult.Reason;
-	CurrentWorldState.GlobalPacingRemainingSeconds = BestPacingResult.GlobalRemaining;
-	CurrentWorldState.NearestRecentEncounterDistance = BestPacingResult.NearestHistoryDistance;
+	CurrentWorldState.SelectedEncounterLocationReason	= BestLocationReason;
+	CurrentWorldState.bPacingAllowsNewEncounter			= BestPacingResult.bPassed;
+	CurrentWorldState.PacingBlockReason					= BestPacingResult.Reason;
+	CurrentWorldState.GlobalPacingRemainingSeconds		= BestPacingResult.GlobalRemaining;
+	CurrentWorldState.NearestRecentEncounterDistance	= BestPacingResult.NearestHistoryDistance;
 }
 
 bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
@@ -154,18 +154,15 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	OutBestPoint = nullptr;
 	OutSpawnTransform = FTransform::Identity;
 
-	OutDebugEntry.bAccepted = false;
-	OutDebugEntry.EncounterId = Definition.EncounterId;
-	OutDebugEntry.PointName = NAME_None;
-	OutDebugEntry.Score = 0.0f;
-	OutDebugEntry.DistanceToPoint = 0.0f;
-	OutDebugEntry.Reason = TEXT("Not evaluated");
-	OutDebugEntry.LocationSource =
-		Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
-		? TEXT("EQS")
-		: TEXT("AuthoredPoint");
-	OutDebugEntry.SelectedLocation = FVector::ZeroVector;
-	OutDebugEntry.LocationReason = TEXT("No location evaluated");
+	OutDebugEntry.bAccepted			= false;
+	OutDebugEntry.EncounterId		= Definition.EncounterId;
+	OutDebugEntry.PointName			= NAME_None;
+	OutDebugEntry.Score				= 0.0f;
+	OutDebugEntry.DistanceToPoint	= 0.0f;
+	OutDebugEntry.Reason			= TEXT("Not evaluated");
+	OutDebugEntry.LocationSource	= Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery ? TEXT("EQS") : TEXT("AuthoredPoint");
+	OutDebugEntry.SelectedLocation	= FVector::ZeroVector;
+	OutDebugEntry.LocationReason	= TEXT("No location evaluated");
 
 	FString WorldMatchReason;
 

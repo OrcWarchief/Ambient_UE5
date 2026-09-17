@@ -184,15 +184,15 @@ void AAmbientDirector::UpdateWorldState()
 		return;
 	}
 
-	CurrentWorldState.GameTimeSeconds = World->GetTimeSeconds();
+	CurrentWorldState.GameTimeSeconds	= World->GetTimeSeconds();
 
-	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-	CurrentWorldState.bHasPlayerPawn = IsValid(PlayerPawn);
+	APawn* PlayerPawn					= UGameplayStatics::GetPlayerPawn(World, 0);
+	CurrentWorldState.bHasPlayerPawn	= IsValid(PlayerPawn);
 
 	if (CurrentWorldState.bHasPlayerPawn)
 	{
-		CurrentWorldState.PlayerLocation = PlayerPawn->GetActorLocation();
-		CurrentWorldState.PlayerSpeed2D = PlayerPawn->GetVelocity().Size2D();
+		CurrentWorldState.PlayerLocation	= PlayerPawn->GetActorLocation();
+		CurrentWorldState.PlayerSpeed2D		= PlayerPawn->GetVelocity().Size2D();
 
 		UpdateCurrentRegion(PlayerPawn);
 		SelectEncounterDefinitionAndPoint();
@@ -255,7 +255,7 @@ void AAmbientDirector::UpdateWorldState()
 
 void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 {
-	CurrentRegion = nullptr;
+	CurrentRegion						= nullptr;
 	CurrentWorldState.bHasCurrentRegion = false;
 	CurrentWorldState.CurrentRegionName = NAME_None;
 
