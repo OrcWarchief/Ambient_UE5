@@ -186,8 +186,8 @@ void AAmbientDirector::BuildDirectorSaveSnapshot(FAmbientDirectorSaveSnapshot& O
 	OutSnapshot.RuntimeEncounterId = NAME_None;
 
 	OutSnapshot.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
-	OutSnapshot.PrototypeEncounterStartCount = PrototypeEncounterStartCount;
-	OutSnapshot.PrototypeEncounterFinishCount = PrototypeEncounterFinishCount;
+	OutSnapshot.EncounterStartCount = EncounterStartCount;
+	OutSnapshot.EncounterFinishCount = EncounterFinishCount;
 	OutSnapshot.PrototypeEncounterHistory = PrototypeEncounterHistory;
 	OutSnapshot.CompletedEncounterIds = CompletedEncounterIds;
 }
@@ -208,8 +208,8 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 	DestroyPrototypeEncounter();
 
 	PrototypeEncounterHistory = Snapshot.PrototypeEncounterHistory;
-	PrototypeEncounterStartCount = Snapshot.PrototypeEncounterStartCount;
-	PrototypeEncounterFinishCount = Snapshot.PrototypeEncounterFinishCount;
+	EncounterStartCount = Snapshot.EncounterStartCount;
+	EncounterFinishCount = Snapshot.EncounterFinishCount;
 	CompletedEncounterIds = Snapshot.CompletedEncounterIds;
 
 	if (bMigratingVersion1)
@@ -245,7 +245,7 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 		LastAnyEncounterStartTimeSeconds = -999999.0f;
 	}
 
-	PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+	EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 	RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 	bHasRuntimeEncounterDefinition = false;
 	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
@@ -258,11 +258,9 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 	PrototypeCooldownEndTimeSeconds = 0.0f;
 	PendingPrototypeFinishReason = TEXT("None");
 
-	CurrentWorldState.bHasActivePrototypeEncounter = false;
-	CurrentWorldState.DistanceToPrototypeEncounter = 0.0f;
-	CurrentWorldState.PrototypeCleanupRemaining = 0.0f;
-	CurrentWorldState.PrototypeCooldownRemaining = 0.0f;
-	CurrentWorldState.PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+	CurrentWorldState.DistanceToEncounter = 0.0f;
+	CurrentWorldState.EncounterCleanupRemainingSeconds = 0.0f;
+	CurrentWorldState.EncounterCooldownRemainingSeconds = 0.0f;
 
 	OutReason = bMigratingVersion1
 		? TEXT(
@@ -287,7 +285,7 @@ bool AAmbientDirector::RestoreRuntimeEncounterFromSave(
 	{
 		DestroyPrototypeEncounter();
 
-		PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+		EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 
 		RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 		bHasRuntimeEncounterDefinition = false;
@@ -408,9 +406,9 @@ bool AAmbientDirector::RestoreRuntimeEncounterFromSave(
 			ActivePrototypeEncounter,
 			RuntimeContext);
 
-	PrototypeEncounterState = Snapshot.RuntimeState;
+	EncounterRuntimeState = Snapshot.RuntimeState;
 
-	switch (PrototypeEncounterState)
+	switch (EncounterRuntimeState)
 	{
 	case EAmbientEncounterRuntimeState::Waiting:
 		IAmbientEncounterRuntimeInterface::

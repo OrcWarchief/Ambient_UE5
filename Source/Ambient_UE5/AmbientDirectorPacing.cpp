@@ -105,11 +105,6 @@ float AAmbientDirector::GetGlobalPacingRemaining() const
 
 float AAmbientDirector::GetNearestRecentEncounterDistance(const FVector& CandidateLocation) const
 {
-	if (PrototypeEncounterHistory.Num() == 0)	//debug 반드시 필요한가? 없어도 될 듯?
-	{
-		return TNumericLimits<float>::Max();
-	}
-
 	float NearestDistance = TNumericLimits<float>::Max();
 
 	for (const FAmbientEncounterHistoryEntry& Entry : PrototypeEncounterHistory)

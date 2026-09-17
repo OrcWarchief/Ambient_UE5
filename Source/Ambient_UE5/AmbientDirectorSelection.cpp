@@ -18,19 +18,9 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	SelectedEncounterSpawnTransform = FTransform::Identity;
 	SelectedEncounterLocationReason = TEXT("No selected encounter location");
 
-	CurrentWorldState.bHasSelectedEncounterDefinition = false;
-	CurrentWorldState.SelectedEncounterDefinitionId = NAME_None;
-	CurrentWorldState.SelectedEncounterDefinitionScore = 0.0f;
-	CurrentWorldState.SelectedEncounterDefinitionReason = TEXT("No encounter definition selected");
-
 	CurrentWorldState.bHasSelectedEncounterPoint = false;
 	CurrentWorldState.SelectedEncounterPointName = NAME_None;
-	CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
-	CurrentWorldState.SelectedEncounterPointReason = TEXT("No encounter point evaluated");
-
 	CurrentWorldState.bHasSelectedEncounterLocation = false;
-	CurrentWorldState.SelectedEncounterLocation = FVector::ZeroVector;
-	CurrentWorldState.SelectedEncounterRotation = FRotator::ZeroRotator;
 	CurrentWorldState.SelectedEncounterLocationSource = TEXT("None");
 	CurrentWorldState.SelectedEncounterLocationReason = TEXT("No encounter location selected");
 
@@ -116,10 +106,6 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	if (!bFoundBestCandidate)
 	{
 		SelectedEncounterReason = TEXT("No accepted encounter definition candidate");
-
-		CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("No point selected because no definition candidate won");
 		CurrentWorldState.SelectedEncounterLocationReason =
 			TEXT("No location selected because no definition candidate won");
 		return;
@@ -132,38 +118,20 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	SelectedEncounterScore = BestScore;
 	SelectedEncounterSpawnTransform = BestSpawnTransform;
 	bHasSelectedEncounterSpawnTransform = true;
-
-	SelectedEncounterReason = FString::Printf(
-		TEXT("Selected highest score candidate: %.1f"),
-		BestScore
-	);
-
-	CurrentWorldState.bHasSelectedEncounterDefinition = true;
-	CurrentWorldState.SelectedEncounterDefinitionId = BestDefinition.EncounterId;
-	CurrentWorldState.SelectedEncounterDefinitionScore = BestScore;
-	CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
+	SelectedEncounterReason = FString::Printf(TEXT("Selected highest score candidate: %.1f"), BestScore);
 
 	if (IsValid(BestPoint))
 	{
-		CurrentWorldState.bHasSelectedEncounterPoint = true;
-		CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
-		CurrentWorldState.SelectedEncounterPointLocation = BestPoint->GetActorLocation();
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("Selected authored point from winning encounter definition");
+		CurrentWorldState.bHasSelectedEncounterPoint		= true;
+		CurrentWorldState.SelectedEncounterPointName		= BestPoint->GetPointName();
 	}
 	else
 	{
-		CurrentWorldState.bHasSelectedEncounterPoint = false;
-		CurrentWorldState.SelectedEncounterPointName = NAME_None;
-		CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("Winning encounter used non-authored location source");
+		CurrentWorldState.bHasSelectedEncounterPoint		= false;
+		CurrentWorldState.SelectedEncounterPointName		= NAME_None;
 	}
 
 	CurrentWorldState.bHasSelectedEncounterLocation = true;
-	CurrentWorldState.SelectedEncounterLocation = BestSpawnTransform.GetLocation();
-	CurrentWorldState.SelectedEncounterRotation = BestSpawnTransform.GetRotation().Rotator();
-
 	CurrentWorldState.SelectedEncounterLocationSource =
 		BestDefinition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
 		? TEXT("EQS")
@@ -172,7 +140,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	CurrentWorldState.SelectedEncounterLocationReason = BestLocationReason;
 	CurrentWorldState.bPacingAllowsNewEncounter = BestPacingResult.bPassed;
 	CurrentWorldState.PacingBlockReason = BestPacingResult.Reason;
-	CurrentWorldState.GlobalPacingRemaining = BestPacingResult.GlobalRemaining;
+	CurrentWorldState.GlobalPacingRemainingSeconds = BestPacingResult.GlobalRemaining;
 	CurrentWorldState.NearestRecentEncounterDistance = BestPacingResult.NearestHistoryDistance;
 }
 
@@ -251,7 +219,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	}
 
 	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(Definition.EncounterPointSearchRadius, MaximumSpawnDistance);
+	const float MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 
 	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
 	const float DistanceAlpha = FMath::Clamp((DistanceToLocation - MinDistance) / DistanceRange, 0.0f, 1.0f);
@@ -259,7 +227,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	// 가까울수록 보너스
 	const float DistanceBonus				= (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
 	const bool bWasMostRecentlyCompleted	= WasMostRecentlyFinishedEncounter(Definition.EncounterId);
-	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.RecentlyCompletedPenalty : 0.0f;
+	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.LastFinishedEncounterPenalty : 0.0f;
 	const float FinalScore					= Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
 
 	OutDebugEntry.bAccepted			= true;
@@ -302,7 +270,7 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		return false;
 	}
 
-	if (Definition.bOneShotPerHistory && HasFinishedEncounter(Definition.EncounterId))
+	if (Definition.bOneShot && HasFinishedEncounter(Definition.EncounterId))
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: one-shot definition %s has already been completed"),
@@ -356,12 +324,12 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		}
 	}
 
-	if (CurrentWorldState.PlayerSpeed2D > Definition.MaxPlayerSpeed)
+	if (CurrentWorldState.PlayerSpeed2D > Definition.MaxPlayerSpeed2D)
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: player moving too fast %.0f > %.0f cm/s"),
 			CurrentWorldState.PlayerSpeed2D,
-			Definition.MaxPlayerSpeed
+			Definition.MaxPlayerSpeed2D
 		);
 		return false;
 	}

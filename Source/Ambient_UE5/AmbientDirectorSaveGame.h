@@ -61,10 +61,10 @@ struct FAmbientDirectorSaveSnapshot
 	FString PendingFinishReason = TEXT("None");
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
-	int32 PrototypeEncounterStartCount = 0;
+	int32 EncounterStartCount = 0;
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
-	int32 PrototypeEncounterFinishCount = 0;
+	int32 EncounterFinishCount = 0;
 
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Ambient Director Save")
 	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;

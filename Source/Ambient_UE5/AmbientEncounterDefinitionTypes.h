@@ -27,12 +27,10 @@ struct FAmbientEncounterDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition")
 	FName EncounterId = TEXT("Encounter.Prototype.Showroom");
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition")
-	FText DisplayName = FText::FromString(TEXT("Prototype Showroom Encounter"));
+	//UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition")
+	//FText DisplayName = FText::FromString(TEXT("Prototype Showroom Encounter"));
 
-	// Legacy Region 이름
-	// 이전 버전 에셋 호환용 fallback 값
-	// 마이그레이션 중 기존 에셋이 깨지지 않도록 유지
+	// RequiredRegionTag가 설정되지 않은 경우 fallback이 사용.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Legacy")
 	FName RequiredRegionName = TEXT("Region.Showroom");
 
@@ -61,7 +59,7 @@ struct FAmbientEncounterDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
 		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
-	TObjectPtr<UEnvQuery> LocationQuery = nullptr;
+	TObjectPtr<UEnvQuery> EQSQuery = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
 		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
@@ -69,7 +67,7 @@ struct FAmbientEncounterDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location", 
 		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides))
-	bool bValidateEQSLocationWithDirectorRules = true;
+	bool bValidateEQSLocation = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Location",
 		meta = (EditCondition = "LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery", EditConditionHides, ClampMin = "-1.0", UIMin = "-1.0", Units = "cm"))
@@ -82,16 +80,16 @@ struct FAmbientEncounterDefinition
 	float DistanceScoreWeight = 30.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection", meta = (ClampMin = "0.0"))
-	float RecentlyCompletedPenalty = 25.0f;
+	float LastFinishedEncounterPenalty = 25.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition|Selection")
-	bool bOneShotPerHistory = false;
+	bool bOneShot = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm"))
-	float EncounterPointSearchRadius = 1200.0f;
+	float SpawnSearchRadius = 1200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm/s"))
-	float MaxPlayerSpeed = 700.0f;
+	float MaxPlayerSpeed2D = 700.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Definition", meta = (ClampMin = "0.0", Units = "cm"))
 	float PlayerEngageDistance = 300.0f;

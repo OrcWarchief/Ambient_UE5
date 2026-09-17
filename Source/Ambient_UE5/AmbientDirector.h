@@ -201,7 +201,7 @@ protected:
 	bool bHasRuntimeEncounterDefinition = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+	EAmbientEncounterRuntimeState EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;
@@ -210,10 +210,10 @@ protected:
 	TSet<FName> CompletedEncounterIds;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	int32 PrototypeEncounterStartCount = 0;
+	int32 EncounterStartCount = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	int32 PrototypeEncounterFinishCount = 0;
+	int32 EncounterFinishCount = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	FName RuntimeEncounterRegionName = NAME_None;

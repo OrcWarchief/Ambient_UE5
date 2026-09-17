@@ -66,6 +66,7 @@ struct FAmbientWorldState
 {
 	GENERATED_BODY()
 
+	// Player inputs
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bHasPlayerPawn = false;
 
@@ -85,40 +86,18 @@ struct FAmbientWorldState
 	FName CurrentRegionName = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	int32 CurrentRegionPriority = 0;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bHasCurrentRegionTag = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FGameplayTag CurrentRegionTag;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FGameplayTagContainer WorldTags;
 
+	// Selected authored point
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bHasSelectedEncounterPoint = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FName SelectedEncounterPointName = NAME_None;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FVector SelectedEncounterPointLocation = FVector::ZeroVector;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FString SelectedEncounterPointReason = TEXT("No encounter point evaluated");
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bHasSelectedEncounterDefinition = false;
-
+	// Selected encounter location
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bHasSelectedEncounterLocation = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FVector SelectedEncounterLocation = FVector::ZeroVector;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FRotator SelectedEncounterRotation = FRotator::ZeroRotator;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FString SelectedEncounterLocationSource = TEXT("None");
@@ -126,44 +105,24 @@ struct FAmbientWorldState
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	FString SelectedEncounterLocationReason = TEXT("No encounter location selected");
 
+	// Encounter conditions and runtime snapshot
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FName SelectedEncounterDefinitionId = NAME_None;
+	bool bEncounterConditionsMet = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float SelectedEncounterDefinitionScore = 0.0f;
+	FString EncounterBlockReason = TEXT("Encounter condition not evaluated");
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FString SelectedEncounterDefinitionReason = TEXT("No encounter definition selected");
+	FString EncounterRuntimeReason = TEXT("Runtime not evaluated");
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bPrototypeEncounterConditionMet = false;
+	float DistanceToEncounter = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	bool bHasActivePrototypeEncounter = false;
+	float EncounterCleanupRemainingSeconds = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FString PrototypeEncounterBlockReason = TEXT("Prototype condition not evaluated");
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	FString PrototypeEncounterRuntimeReason = TEXT("Runtime not evaluated");
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float DistanceToPrototypeEncounter = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float PrototypeCleanupRemaining = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float PrototypeCooldownRemaining = 0.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	int32 PrototypeEncounterStartCount = 0;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	int32 PrototypeEncounterFinishCount = 0;
+	float EncounterCooldownRemainingSeconds = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	bool bPacingAllowsNewEncounter = true;
@@ -178,19 +137,13 @@ struct FAmbientWorldState
 	int32 MaxEncounterBudget = 1;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
-	float GlobalPacingRemaining = 0.0f;
+	float GlobalPacingRemainingSeconds = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State")
 	float NearestRecentEncounterDistance = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
 	EAmbientTraversalState TraversalState = EAmbientTraversalState::OnFoot;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
-	bool bIsMounted = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|World State|Traversal")
-	TObjectPtr<AActor> TraversalActor = nullptr;
 };
 
 USTRUCT(BlueprintType)
@@ -214,7 +167,8 @@ struct FAmbientPacingResult
 	float NearestHistoryDistance = 0.0f;
 };
 
-USTRUCT(BlueprintType) // debug only data
+// 후보 평과 결과와 진단 정보 Scroe는 실제 승자 선정에도 사용
+USTRUCT(BlueprintType)
 struct FAmbientEncounterSelectionDebugEntry
 {
 	GENERATED_BODY()

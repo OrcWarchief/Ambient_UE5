@@ -75,7 +75,7 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 
 	const float MinDistance = MinimumSpawnDistance;
 	const float MaxDistance = FMath::Min(
-		Definition.EncounterPointSearchRadius,
+		Definition.SpawnSearchRadius,
 		MaximumSpawnDistance
 	);
 
@@ -184,7 +184,7 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 	OutDistanceToLocation = 0.0f;
 	OutReason = TEXT("No EQS query evaluated");
 
-	if (!Definition.LocationQuery)
+	if (!Definition.EQSQuery)
 	{
 		OutReason = TEXT("Rejected: no EQS query defined");
 		return false;
@@ -213,11 +213,11 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 		return false;
 	}
 
-	FEnvQueryRequest QueryRequest(Definition.LocationQuery, PlayerPawn);
+	FEnvQueryRequest QueryRequest(Definition.EQSQuery, PlayerPawn);
 
 	EEnvQueryRunMode::Type QueryRunMode = Definition.EQSRunMode.GetValue();
 
-	if (Definition.bValidateEQSLocationWithDirectorRules)
+	if (Definition.bValidateEQSLocation)
 	{
 		QueryRunMode = EEnvQueryRunMode::AllMatching;
 	}
@@ -253,7 +253,7 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 	const float EffectiveMaximumDistance =
 		FMath::Min(
-			FMath::Max(0.0f, Definition.EncounterPointSearchRadius),
+			FMath::Max(0.0f, Definition.SpawnSearchRadius),
 			FMath::Max(0.0f, MaximumSpawnDistance)
 		);
 
@@ -281,7 +281,7 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 		FString ValidationReason = TEXT("EQS location accepted without Director validation");
 
-		if (Definition.bValidateEQSLocationWithDirectorRules)
+		if (Definition.bValidateEQSLocation)
 		{
 			const bool bLocationPassedValidation =
 				ValidateEQSLocationCandidate(
