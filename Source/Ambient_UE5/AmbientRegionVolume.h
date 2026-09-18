@@ -18,6 +18,7 @@ class AMBIENT_UE5_API AAmbientRegionVolume : public AActor
 public:
 	AAmbientRegionVolume();
 
+	// 월드 공간의 점을 테스트합니다. 경계 위의 점은 내부에 있는 것으로 간주됩니다.
 	bool ContainsWorldLocation(const FVector& WorldLocation) const;
 
 	FName GetRegionName() const { return RegionName; }
@@ -37,12 +38,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	TObjectPtr<UBoxComponent> RegionBounds;
 
+	// Legacy 이름 매칭, 런타임 컨텍스트 및 디버그 레이블.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	FName RegionName = TEXT("Region.Showroom");
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region", meta = (Categories = "Region"))
 	FGameplayTag RegionTag;
 
+	// 우선 순위가 높은 RegionVolume이 낮은 우선 순위의 RegionVolume보다 먼저 평가됩니다.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	int32 Priority = 0;
 

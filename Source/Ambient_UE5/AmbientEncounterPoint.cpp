@@ -18,10 +18,6 @@ AAmbientEncounterPoint::AAmbientEncounterPoint()
 	FacingArrow->SetupAttachment(SceneRoot);
 	FacingArrow->SetRelativeScale3D(FVector(2.0f, 2.0f, 2.0f));
 
-	RegionTag = FGameplayTag::RequestGameplayTag(
-		TEXT("Region.Showroom"),
-		false
-	);
-
+	RegionTag = FGameplayTag::RequestGameplayTag(TEXT("Region.Showroom"), false);
 	PointTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("Point.Showroom"), false));
 }

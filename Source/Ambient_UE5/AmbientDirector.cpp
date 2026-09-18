@@ -255,55 +255,47 @@ void AAmbientDirector::UpdateWorldState()
 
 void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 {
-	CurrentRegion						= nullptr;
+	CurrentRegion = nullptr;
 	CurrentWorldState.bHasCurrentRegion = false;
 	CurrentWorldState.CurrentRegionName = NAME_None;
 
 	UWorld* World = GetWorld();
-
 	if (!World || !IsValid(PlayerPawn))
 	{
 		return;
 	}
 
 	const FVector QueryLocation = CurrentWorldState.PlayerLocation;
-
-	bool bFoundAnyRegion = false;
-	int32 BestPriority = 0;
+	AAmbientRegionVolume* BestRegion = nullptr;
 
 	for (TActorIterator<AAmbientRegionVolume> RegionIt(World); RegionIt; ++RegionIt)
 	{
 		AAmbientRegionVolume* Region = *RegionIt;
 
-		if (!IsValid(Region))
+		if (!IsValid(Region) || !Region->ContainsWorldLocation(QueryLocation))
 		{
 			continue;
 		}
-
-		if (!Region->ContainsWorldLocation(QueryLocation))
+		
+		if (!BestRegion || Region->GetPriority() > BestRegion->GetPriority())
 		{
-			continue;
-		}
-
-		if (!bFoundAnyRegion || Region->GetPriority() > BestPriority)
-		{
-			bFoundAnyRegion = true;
-			BestPriority = Region->GetPriority();
-			CurrentRegion = Region;
+			BestRegion = Region;
 		}
 	}
 
-	if (IsValid(CurrentRegion))
+	if (!BestRegion)
 	{
-		CurrentWorldState.bHasCurrentRegion = true;
-		CurrentWorldState.CurrentRegionName = CurrentRegion->GetRegionName();
+		return;
+	}
 
-		const FGameplayTag RegionTag = CurrentRegion->GetRegionTag();
+	CurrentRegion = BestRegion;
+	CurrentWorldState.bHasCurrentRegion = true;
+	CurrentWorldState.CurrentRegionName = BestRegion->GetRegionName();
 
-		if (RegionTag.IsValid())
-		{
-			CurrentWorldState.WorldTags.AddTag(RegionTag);
-		}
+	const FGameplayTag RegionTag = BestRegion->GetRegionTag();
+	if (RegionTag.IsValid())
+	{
+		CurrentWorldState.WorldTags.AddTag(RegionTag);
 	}
 }
 

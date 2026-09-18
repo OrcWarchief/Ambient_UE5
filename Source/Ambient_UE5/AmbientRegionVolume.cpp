@@ -18,16 +18,13 @@ AAmbientRegionVolume::AAmbientRegionVolume()
 
 	RegionBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("RegionBounds"));
 	RegionBounds->SetupAttachment(SceneRoot);
-
 	RegionBounds->InitBoxExtent(FVector(1000.0f, 1000.0f, 500.0f));
 
+	// Director가 경계를 폴링합니다. 충돌 이벤트는 사용되지 않습니다.
 	RegionBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RegionBounds->SetGenerateOverlapEvents(false);
 
-	RegionTag = FGameplayTag::RequestGameplayTag(
-		TEXT("Region.Showroom"),
-		false
-	);
+	RegionTag = FGameplayTag::RequestGameplayTag(TEXT("Region.Showroom"), false);
 }
 
 bool AAmbientRegionVolume::ContainsWorldLocation(const FVector& WorldLocation) const

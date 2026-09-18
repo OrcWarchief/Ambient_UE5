@@ -60,10 +60,10 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 	FString& OutReason
 ) const
 {
-	OutSpawnTransform = FTransform::Identity;
-	OutBestPoint = nullptr;
-	OutDistanceToPoint = 0.0f;
-	OutReason = TEXT("No authored point evaluated");
+	OutSpawnTransform	= FTransform::Identity;
+	OutBestPoint		= nullptr;
+	OutDistanceToPoint	= 0.0f;
+	OutReason			= TEXT("No authored point evaluated");
 
 	UWorld* World = GetWorld();
 
@@ -80,22 +80,17 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: invalid authored-point distance range Min=%.0f Max=%.0f"),
-			MinDistance,
-			MaxDistance
-		);
+			MinDistance, MaxDistance);
 		return false;
 	}
 
-	const float MinDistanceSq = FMath::Square(MinDistance);
-	const float MaxDistanceSq = FMath::Square(MaxDistance);
-
-	float BestDistanceSq = TNumericLimits<float>::Max();
-	AAmbientEncounterPoint* BestPoint = nullptr;
+	const float MinDistanceSq	= FMath::Square(MinDistance);
+	const float MaxDistanceSq	= FMath::Square(MaxDistance);
+	float BestDistanceSq		= TNumericLimits<float>::Max();
 
 	for (TActorIterator<AAmbientEncounterPoint> PointIt(World); PointIt; ++PointIt)
 	{
 		AAmbientEncounterPoint* Point = *PointIt;
-
 		if (!IsValid(Point) || !Point->IsPointEnabled())
 		{
 			continue;
@@ -106,10 +101,7 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 			continue;
 		}
 
-		const float DistanceSq = FVector::DistSquared2D(
-			CurrentWorldState.PlayerLocation,
-			Point->GetActorLocation()
-		);
+		const float DistanceSq = FVector::DistSquared2D(CurrentWorldState.PlayerLocation, Point->GetActorLocation());
 
 		if (DistanceSq < MinDistanceSq || DistanceSq > MaxDistanceSq)
 		{
@@ -118,34 +110,24 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 
 		if (DistanceSq < BestDistanceSq)
 		{
-			BestDistanceSq = DistanceSq;
-			BestPoint = Point;
+			BestDistanceSq	= DistanceSq;
+			OutBestPoint	= Point;
 		}
 	}
 
-	BestPoint = GetValid(BestPoint);
-
-	if (BestPoint == nullptr)
+	if (!IsValid(OutBestPoint))
 	{
-		OutReason = FString::Printf(
-			TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"),
-			MinDistance,
-			MaxDistance
-		);
+		OutReason = FString::Printf(TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"), MinDistance, MaxDistance);
 		return false;
 	}
 
-	OutBestPoint		= BestPoint;
 	OutDistanceToPoint	= FMath::Sqrt(BestDistanceSq);
-	OutSpawnTransform	= BestPoint->GetEncounterSpawnTransform();
-
-	OutReason = FString::Printf(
-		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
-		*BestPoint->GetPointName().ToString(),
-		OutDistanceToPoint
-	);
+	OutSpawnTransform	= OutBestPoint->GetEncounterSpawnTransform();
+	OutReason			= FString::Printf(
+		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),*OutBestPoint->GetPointName().ToString(), OutDistanceToPoint);
 
 	return true;
+
 }
 
 float AAmbientDirector::GetAutomaticEQSSpawnHeightOffset(const FAmbientEncounterDefinition& Definition) const
@@ -470,37 +452,21 @@ bool AAmbientDirector::DoesEncounterPointMatchDefinition(
 		return false;
 	}
 
+	// Region 태그가 설정되어 있으면 기존 Region 이름보다 우선해서 검사한다.
 	if (Definition.RequiredRegionTag.IsValid())
 	{
-		const FGameplayTag PointRegionTag = Point->GetRegionTag();
-
-		if (!PointRegionTag.IsValid())
-		{
-			return false;
-		}
-
-		if (!PointRegionTag.MatchesTagExact(Definition.RequiredRegionTag))
+		if (!Point->GetRegionTag().MatchesTagExact(Definition.RequiredRegionTag))
 		{
 			return false;
 		}
 	}
-	else if (Definition.RequiredRegionName != NAME_None)
+	else if (Definition.RequiredRegionName != NAME_None && Point->GetRegionName() != Definition.RequiredRegionName)
 	{
-		if (Point->GetRegionName() != Definition.RequiredRegionName)
-		{
-			return false;
-		}
+		return false;
 	}
 
-	if (!Definition.RequiredPointTags.IsEmpty())
-	{
-		if (!Point->GetPointTags().HasAllExact(Definition.RequiredPointTags))
-		{
-			return false;
-		}
-	}
-
-	return true;
+	// 요구 Point 태그가 비어 있으면 Point 태그 조건은 없는 것으로 처리한다.
+	return Point->GetPointTags().HasAllExact(Definition.RequiredPointTags);
 }
 
 bool AAmbientDirector::ProjectPointToGround(
