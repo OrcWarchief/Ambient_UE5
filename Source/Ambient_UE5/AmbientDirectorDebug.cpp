@@ -367,8 +367,9 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 
 void AAmbientDirector::DrawRegionDebug() const
 {
-	UWorld* World = GetWorld();
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_DrawRegionDebug);
 
+	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
@@ -439,8 +440,9 @@ void AAmbientDirector::DrawRegionDebug() const
 
 void AAmbientDirector::DrawEncounterPointDebug() const
 {
-	UWorld* World = GetWorld();
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_DrawEncounterPointDebug);
 
+	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;

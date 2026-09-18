@@ -18,8 +18,10 @@ class AMBIENT_UE5_API AAmbientRegionVolume : public AActor
 public:
 	AAmbientRegionVolume();
 
-	// ¿ùµå °ø°£ÀÇ Á¡À» Å×½ºÆ®ÇÕ´Ï´Ù. °æ°è À§ÀÇ Á¡Àº ³»ºÎ¿¡ ÀÖ´Â °ÍÀ¸·Î °£ÁÖµË´Ï´Ù.
+	// ì›”ë“œ ì¢Œí‘œë¡œ ë°›ì€ ì ì´ ë³¼ë¥¨ ì•ˆì— ìˆëŠ”ì§€ í™•ì¸, ê²½ê³„ì— ìˆëŠ” ì ë„ ë‚´ë¶€ë¡œ ì²˜ë¦¬í•œë‹¤.
 	bool ContainsWorldLocation(const FVector& WorldLocation) const;
+
+	bool IsPreferredOver(const AAmbientRegionVolume& Other) const;
 
 	FName GetRegionName() const { return RegionName; }
 
@@ -31,6 +33,10 @@ public:
 
 	FGameplayTag GetRegionTag() const { return RegionTag; }
 
+#if WITH_EDITOR
+	virtual void CheckForErrors() override;
+#endif
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -38,17 +44,21 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	TObjectPtr<UBoxComponent> RegionBounds;
 
-	// Legacy ÀÌ¸§ ¸ÅÄª, ·±Å¸ÀÓ ÄÁÅØ½ºÆ® ¹× µğ¹ö±× ·¹ÀÌºí.
+	// ë¦¬ì „ì„ ì´ë¦„ìœ¼ë¡œ ë¹„êµí•˜ëŠ” ê¸°ì¡´ ì½”ë“œì—ì„œ ì‚¬ìš©, ëŸ°íƒ€ì„ ì»¨í…ìŠ¤íŠ¸ì™€ ë””ë²„ê·¸ í‘œì‹œì—ë„ ì´ ì´ë¦„ì„ ì“´ë‹¤.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	FName RegionName = TEXT("Region.Showroom");
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region", meta = (Categories = "Region"))
 	FGameplayTag RegionTag;
 
-	// ¿ì¼± ¼øÀ§°¡ ³ôÀº RegionVolumeÀÌ ³·Àº ¿ì¼± ¼øÀ§ÀÇ RegionVolumeº¸´Ù ¸ÕÀú Æò°¡µË´Ï´Ù.
+	// í”Œë ˆì´ì–´ë¥¼ í¬í•¨í•˜ëŠ” ë¦¬ì „ ì¤‘ Priorityê°€ ê°€ì¥ ë†’ì€ ê²ƒì„ ì„ íƒí•œë‹¤.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	int32 Priority = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Region")
 	FLinearColor RegionDebugColor = FLinearColor(0.1f, 0.5f, 1.0f, 1.0f);
+
+private:
+	// Regionìœ¼ë¡œ ì‚¬ìš©í•  ìˆ˜ ìˆëŠ” ë°•ìŠ¤ í¬ê¸°ì¸ì§€ í™•ì¸í•œë‹¤.
+	bool HasUsableBounds() const;
 };

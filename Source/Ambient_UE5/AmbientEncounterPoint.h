@@ -26,12 +26,16 @@ public:
 
 	float GetDebugRadius() const { return DebugRadius; }
 
-	// È­»ìÇ¥ ÄÄÆ÷³ÍÆ®ÀÇ »ó´ë Æ®·£½ºÆûÀÌ ¾Æ´Ï¶ó ¾×ÅÍ Æ®·£½ºÆûÀ» »ç¿ë.
+	// í™”ì‚´í‘œ ì»´í¬ë„ŒíŠ¸ì˜ ìƒëŒ€ íŠ¸ëœìŠ¤í¼ì´ ì•„ë‹ˆë¼ ì•¡í„° íŠ¸ëœìŠ¤í¼ì„ ì‚¬ìš©.
 	FTransform GetEncounterSpawnTransform() const { return GetActorTransform(); }
 
 	FGameplayTag GetRegionTag() const { return RegionTag; }
 
 	const FGameplayTagContainer& GetPointTags() const { return PointTags; }
+
+#if WITH_EDITOR
+	virtual void CheckForErrors() override;
+#endif
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Point")
@@ -40,15 +44,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Point")
 	TObjectPtr<UArrowComponent> FacingArrow;
 
-	// ÈÄº¸ ¼±ÅÃ °¡´É ¿©ºÎ¸¦ Á¦¾î. ÀÌ¹Ì Á¸ÀçÇÏ´Â EncounterÀÇ ¼ö¸íÀº Á¦¾îÇÏÁö ¾ÊÀ½.
+	// í›„ë³´ ì„ íƒ ê°€ëŠ¥ ì—¬ë¶€ë¥¼ ì œì–´. ì´ë¯¸ ì¡´ì¬í•˜ëŠ” Encounterì˜ ìˆ˜ëª…ì€ ì œì–´í•˜ì§€ ì•ŠìŒ.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Point")
 	bool bEnabled = true;
 
-	//Á÷Á¢ ÁöÁ¤ÇÑ ¶óº§. Áø´Ü Ãâ·Â°ú Encounter ÀÌ·Â¿¡ »ç¿ë.
+	//ì§ì ‘ ì§€ì •í•œ ë¼ë²¨. ì§„ë‹¨ ì¶œë ¥ê³¼ Encounter ì´ë ¥ì— ì‚¬ìš©.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Point")
 	FName PointName = TEXT("EP.Showroom.01");
 
-	// Definition¿¡ À¯È¿ÇÑ RequiredRegionTag°¡ ¾øÀ» ¶§¸¸ »ç¿ë.
+	// Definitionì— ìœ íš¨í•œ RequiredRegionTagê°€ ì—†ì„ ë•Œë§Œ ì‚¬ìš©.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Encounter Point")
 	FName RegionName = TEXT("Region.Showroom");
 

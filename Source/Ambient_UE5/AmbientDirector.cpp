@@ -11,6 +11,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 
 AAmbientDirector::AAmbientDirector()
@@ -152,6 +153,8 @@ void AAmbientDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AAmbientDirector::UpdateWorldState()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_UpdateWorldState);
+
 	CurrentWorldState = FAmbientWorldState();
 	CurrentWorldState.CurrentEncounterBudgetUse		= GetCurrentEncounterBudgetUse();
 	CurrentWorldState.MaxEncounterBudget			= MaxSimultaneousPrototypeEncounters;
@@ -255,6 +258,8 @@ void AAmbientDirector::UpdateWorldState()
 
 void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_UpdateCurrentRegion);
+
 	CurrentRegion = nullptr;
 	CurrentWorldState.bHasCurrentRegion = false;
 	CurrentWorldState.CurrentRegionName = NAME_None;
@@ -265,8 +270,8 @@ void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 		return;
 	}
 
-	const FVector QueryLocation = CurrentWorldState.PlayerLocation;
-	AAmbientRegionVolume* BestRegion = nullptr;
+	const FVector QueryLocation			= CurrentWorldState.PlayerLocation;
+	AAmbientRegionVolume* BestRegion	= nullptr;
 
 	for (TActorIterator<AAmbientRegionVolume> RegionIt(World); RegionIt; ++RegionIt)
 	{
@@ -276,8 +281,8 @@ void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 		{
 			continue;
 		}
-		
-		if (!BestRegion || Region->GetPriority() > BestRegion->GetPriority())
+
+		if (!BestRegion || Region->IsPreferredOver(*BestRegion))
 		{
 			BestRegion = Region;
 		}
@@ -369,31 +374,31 @@ void AAmbientDirector::EvaluatePrototypeEncounterCondition()
 void AAmbientDirector::UpdatePrototypeEncounter()
 {
 	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
-	// ÇöÀç °ÔÀÓ ½Ã°£. Cleanup / Cooldown Á¾·á ½ÃÁ¡ °è»ê¿¡ »ç¿ë
+	// í˜„ì¬ ê²Œì„ ì‹œê°„. Cleanup / Cooldown ì¢…ë£Œ ì‹œì  ê³„ì‚°ì— ì‚¬ìš©
 	const float Now = CurrentWorldState.GameTimeSeconds;
 
 	switch (EncounterRuntimeState)
 	{
 	case EAmbientEncounterRuntimeState::Waiting:
 	{
-		// Waiting »óÅÂ:
-		// ¾ÆÁ÷ ÇÃ·¹ÀÌ¾î°¡ Encounter¿¡ ÁøÀÔX
-		// Enocunter ¾×ÅÍ°¡ ¾øÀ¸¸é Á¶°Ç È®ÀÎ ÈÄ »ı¼º (AmbientPlaceholderEncounter)
-		// Enocunter ¾×°¡ ÀÖÀ¸¸é ÇÃ·¹ÀÌ¾î Á¢±Ù ¿©ºÎ °Ë»ç
+		// Waiting ìƒíƒœ:
+		// ì•„ì§ í”Œë ˆì´ì–´ê°€ Encounterì— ì§„ì…X
+		// Enocunter ì•¡í„°ê°€ ì—†ìœ¼ë©´ ì¡°ê±´ í™•ì¸ í›„ ìƒì„± (AmbientPlaceholderEncounter)
+		// Enocunter ì•¡ê°€ ìˆìœ¼ë©´ í”Œë ˆì´ì–´ ì ‘ê·¼ ì—¬ë¶€ ê²€ì‚¬
 		if (!IsValid(ActivePrototypeEncounter))
 		{
 			if (!CurrentWorldState.bEncounterConditionsMet)
 			{
-				// Encounter ¾×ÅÍ°¡ ¾ø´Â »óÅÂ
-				// ÇöÀç Encounter ¹ß»ı Á¶°ÇÀ» ¸¸Á·ÇÏÁö ¾ÊÀ¸¸é Á¤¸® ÈÄ ´ë±â
+				// Encounter ì•¡í„°ê°€ ì—†ëŠ” ìƒíƒœ
+				// í˜„ì¬ Encounter ë°œìƒ ì¡°ê±´ì„ ë§Œì¡±í•˜ì§€ ì•Šìœ¼ë©´ ì •ë¦¬ í›„ ëŒ€ê¸°
 				DestroyPrototypeEncounter();
 				CurrentWorldState.EncounterRuntimeReason =
 					CurrentWorldState.EncounterBlockReason;
 				return;
 			}
 
-			// Encounter ¹ß»ı Á¶°ÇÀº ¸¸Á·
-			// Spawn ¶Ç´Â Update ½ÇÆĞ ½Ã RuntimeReason ±â·Ï ÈÄ Á¾·á
+			// Encounter ë°œìƒ ì¡°ê±´ì€ ë§Œì¡±
+			// Spawn ë˜ëŠ” Update ì‹¤íŒ¨ ì‹œ RuntimeReason ê¸°ë¡ í›„ ì¢…ë£Œ
 			if (!TrySpawnOrUpdatePrototypeEncounter())
 			{
 				CurrentWorldState.EncounterRuntimeReason = TEXT("Failed to spawn or update prototype encounter");
@@ -408,8 +413,8 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 			if (bHasRequiredRegion)
 			{
-				// ÇÃ·¹ÀÌ¾î°¡ ÇÊ¼ö RegionÀ» ¹ş¾î³­ °æ¿ì
-				// Waiting ÁßÀÌ´ø Encounter Á¦°Å
+				// í”Œë ˆì´ì–´ê°€ í•„ìˆ˜ Regionì„ ë²—ì–´ë‚œ ê²½ìš°
+				// Waiting ì¤‘ì´ë˜ Encounter ì œê±°
 				bool bWrongRegion = false;
 
 				if (Definition.RequiredRegionTag.IsValid())
@@ -446,7 +451,7 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 		if (Definition.WaitingAbandonDistance > 0.0f)
 		{
-			// ÇÃ·¹ÀÌ¾î°¡ Abandon °Å¸® ¹ÛÀ¸·Î ³ª°¡¸é Waiting Á¦°Å
+			// í”Œë ˆì´ì–´ê°€ Abandon ê±°ë¦¬ ë°–ìœ¼ë¡œ ë‚˜ê°€ë©´ Waiting ì œê±°
 			const float MaximumInitialSpawnDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 			const float SafeWaitingAbandonDistance = FMath::Max(Definition.WaitingAbandonDistance, MaximumInitialSpawnDistance + 100.f);
 
@@ -464,8 +469,8 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			}
 		}
 
-		// Encounter´Â ÁØºñµÊ
-		// ÇÃ·¹ÀÌ¾î°¡ Engage °Å¸® ¾ÈÀ¸·Î µé¾î¿À¸é Encounter ½ÃÀÛ
+		// EncounterëŠ” ì¤€ë¹„ë¨
+		// í”Œë ˆì´ì–´ê°€ Engage ê±°ë¦¬ ì•ˆìœ¼ë¡œ ë“¤ì–´ì˜¤ë©´ Encounter ì‹œì‘
 		CurrentWorldState.EncounterRuntimeReason = TEXT("Waiting for player approach");
 		if (DistanceToEncounter <= Definition.PlayerEngageDistance)
 		{
@@ -477,13 +482,13 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 	case EAmbientEncounterRuntimeState::Active:
 	{
-		// Active »óÅÂ:
-		// ÇÃ·¹ÀÌ¾î°¡ Encounter¿¡ Âü¿© ÁßÀÎ »óÅÂ
-		// Encounter ¾×ÅÍ À¯È¿¼º °Ë»ç
-		// ÇÃ·¹ÀÌ¾î°¡ Encounter ¹İ°æÀ» ¹ş¾î³µ´ÂÁö °Ë»ç
+		// Active ìƒíƒœ:
+		// í”Œë ˆì´ì–´ê°€ Encounterì— ì°¸ì—¬ ì¤‘ì¸ ìƒíƒœ
+		// Encounter ì•¡í„° ìœ íš¨ì„± ê²€ì‚¬
+		// í”Œë ˆì´ì–´ê°€ Encounter ë°˜ê²½ì„ ë²—ì–´ë‚¬ëŠ”ì§€ ê²€ì‚¬
 		if (!IsValid(ActivePrototypeEncounter))
 		{
-			// Active »óÅÂ¿¡¼­ Encounter ¾×ÅÍ°¡ À¯È¿ÇÏÁö ¾ÊÀ¸¸é Cleanup ÁøÀÔ
+			// Active ìƒíƒœì—ì„œ Encounter ì•¡í„°ê°€ ìœ íš¨í•˜ì§€ ì•Šìœ¼ë©´ Cleanup ì§„ì…
 			BeginPrototypeCleanup(TEXT("Active encounter actor became invalid"));
 			break;
 		}
@@ -497,14 +502,14 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			break;
 		}
 
-		// ÇÃ·¹ÀÌ¾î°¡ Leave °Å¸® ¹ÛÀ¸·Î ³ª°¡¸é Cleanup ÁøÀÔ
+		// í”Œë ˆì´ì–´ê°€ Leave ê±°ë¦¬ ë°–ìœ¼ë¡œ ë‚˜ê°€ë©´ Cleanup ì§„ì…
 		if (DistanceToEncounter >= Definition.PlayerLeaveDistance)
 		{
 			BeginPrototypeCleanup(TEXT("Player left encounter radius"));
 			break;
 		}
 
-		// Encounter°¡ Á¤»ó ÁøÇà ÁßÀÎ »óÅÂ
+		// Encounterê°€ ì •ìƒ ì§„í–‰ ì¤‘ì¸ ìƒíƒœ
 		CurrentWorldState.EncounterRuntimeReason = TEXT("Player is involved in encounter");
 
 		break;
@@ -512,12 +517,12 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 	case EAmbientEncounterRuntimeState::Cleanup:
 	{
-		// Cleanup »óÅÂ:
-		// Encounter Á¾·á ÈÄ Á¤¸® ÁßÀÎ »óÅÂ
-		// Cleanup ½Ã°£ÀÌ ³¡³ª¸é Encounter ¿ÏÀü Á¾·á
+		// Cleanup ìƒíƒœ:
+		// Encounter ì¢…ë£Œ í›„ ì •ë¦¬ ì¤‘ì¸ ìƒíƒœ
+		// Cleanup ì‹œê°„ì´ ëë‚˜ë©´ Encounter ì™„ì „ ì¢…ë£Œ
 		const float Remaining = PrototypeCleanupEndTimeSeconds - Now;
 
-		// Cleanup ½Ã°£ÀÌ ³¡³­ °æ¿ì
+		// Cleanup ì‹œê°„ì´ ëë‚œ ê²½ìš°
 		if (Remaining <= 0.0f)
 		{
 			const FString FinishReason = PendingPrototypeFinishReason.IsEmpty()
@@ -528,7 +533,7 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			break;
 		}
 
-		// Cleanup ÁøÇà ÁßÀÎ ÀÌÀ¯ ±â·Ï
+		// Cleanup ì§„í–‰ ì¤‘ì¸ ì´ìœ  ê¸°ë¡
 		CurrentWorldState.EncounterRuntimeReason = FString::Printf(
 			TEXT("Cleaning up: %s"),
 			*PendingPrototypeFinishReason
@@ -539,14 +544,14 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 	case EAmbientEncounterRuntimeState::Cooldown:
 	{
-		// Cooldown »óÅÂ:
-		// Encounter Á¾·á ÈÄ Àç»ı¼º ¹æÁö ´ë±â »óÅÂ
-		// Cooldown Áß¿¡´Â Encounter ¾×ÅÍ°¡ ³²¾Æ ÀÖÁö ¾Êµµ·Ï Á¦°Å
+		// Cooldown ìƒíƒœ:
+		// Encounter ì¢…ë£Œ í›„ ì¬ìƒì„± ë°©ì§€ ëŒ€ê¸° ìƒíƒœ
+		// Cooldown ì¤‘ì—ëŠ” Encounter ì•¡í„°ê°€ ë‚¨ì•„ ìˆì§€ ì•Šë„ë¡ ì œê±°
 		DestroyPrototypeEncounter();
 
 		const float Remaining = PrototypeCooldownEndTimeSeconds - Now;
 
-		// Cooldown ½Ã°£ÀÌ ³¡³ª¸é Waiting »óÅÂ·Î º¹±Í
+		// Cooldown ì‹œê°„ì´ ëë‚˜ë©´ Waiting ìƒíƒœë¡œ ë³µê·€
 		if (Remaining <= 0.0f)
 		{
 			EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
@@ -569,7 +574,7 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 			break;
 		}
 
-		// ¾ÆÁ÷ Cooldown ´ë±â Áß
+		// ì•„ì§ Cooldown ëŒ€ê¸° ì¤‘
 		CurrentWorldState.EncounterRuntimeReason = TEXT("Cooldown remaining");
 
 		break;
@@ -577,8 +582,8 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 	default:
 	{
-		// ¾Ë ¼ö ¾ø´Â »óÅÂ
-		// ¾ÈÀüÇÏ°Ô Waiting »óÅÂ·Î º¹±¸
+		// ì•Œ ìˆ˜ ì—†ëŠ” ìƒíƒœ
+		// ì•ˆì „í•˜ê²Œ Waiting ìƒíƒœë¡œ ë³µêµ¬
 
 		EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 		CurrentWorldState.EncounterRuntimeReason = TEXT("Unknown state corrected to Waiting");
@@ -589,25 +594,25 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 
 const FAmbientEncounterDefinition& AAmbientDirector::GetPrototypeEncounterDefinition() const
 {
-	// Spawn ÀÌÈÄ »óÅÂ¿¡¼­´Â Spawn ½ÃÁ¡¿¡ °íÁ¤µÈ Runtime Á¤ÀÇ°ª »ç¿ë
+	// Spawn ì´í›„ ìƒíƒœì—ì„œëŠ” Spawn ì‹œì ì— ê³ ì •ëœ Runtime ì •ì˜ê°’ ì‚¬ìš©
 	if (bHasRuntimeEncounterDefinition)
 	{
 		return RuntimeEncounterDefinition;
 	}
 
-	// ÈÄº¸ Æò°¡ Áß¿¡´Â ÇöÀç ¼±ÅÃµÈ Encounter Á¤ÀÇ°ª »ç¿ë
+	// í›„ë³´ í‰ê°€ ì¤‘ì—ëŠ” í˜„ì¬ ì„ íƒëœ Encounter ì •ì˜ê°’ ì‚¬ìš©
 	if (bHasSelectedEncounterDefinition)
 	{
 		return SelectedEncounterDefinition;
 	}
 
-	// ±âÁ¸ ´ÜÀÏ Encounter Á¤ÀÇ ¿¡¼Â fallback
+	// ê¸°ì¡´ ë‹¨ì¼ Encounter ì •ì˜ ì—ì…‹ fallback
 	if (IsValid(PrototypeEncounterDefinitionAsset))
 	{
 		return PrototypeEncounterDefinitionAsset->Definition;
 	}
 
-	// ÃÖÁ¾ ÀÎ¶óÀÎ fallback Á¤ÀÇ°ª
+	// ìµœì¢… ì¸ë¼ì¸ fallback ì •ì˜ê°’
 	return PrototypeEncounterDefinition;
 }
 
@@ -731,7 +736,7 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 	}
 	else if (bHasSelectedEncounterSpawnTransform && IsValid(SelectedEncounterPoint))
 	{
-		// EQS Encounter´Â ½ºÆù µÚ À§Ä¡ ÀÌµ¿ X, Point°¡ ÀÖ´Â Authored ¹æ½ÄÀÏ ¶§¸¸ À§Ä¡ ÀÌµ¿ 
+		// EQS EncounterëŠ” ìŠ¤í° ë’¤ ìœ„ì¹˜ ì´ë™ X, Pointê°€ ìˆëŠ” Authored ë°©ì‹ì¼ ë•Œë§Œ ìœ„ì¹˜ ì´ë™ 
 		ActivePrototypeEncounter->SetActorTransform(SelectedEncounterSpawnTransform);
 	}
 

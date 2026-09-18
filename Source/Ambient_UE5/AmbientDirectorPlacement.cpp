@@ -53,23 +53,35 @@ bool AAmbientDirector::FindSpawnTransformForDefinition(
 }
 
 bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
-	const FAmbientEncounterDefinition& Definition,
-	FTransform& OutSpawnTransform,
-	AAmbientEncounterPoint*& OutBestPoint,
-	float& OutDistanceToPoint,
-	FString& OutReason
-) const
+	const FAmbientEncounterDefinition& Definition, FTransform& OutSpawnTransform,
+	AAmbientEncounterPoint*& OutBestPoint, float& OutDistanceToPoint, FString& OutReason) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_FindAuthoredPoint);
+
 	OutSpawnTransform	= FTransform::Identity;
 	OutBestPoint		= nullptr;
 	OutDistanceToPoint	= 0.0f;
-	OutReason			= TEXT("No authored point evaluated");
 
 	UWorld* World = GetWorld();
-
 	if (!World)
 	{
 		OutReason = TEXT("Rejected: no world");
+		return false;
+	}
+
+	if (!FMath::IsFinite(MinimumSpawnDistance) || !FMath::IsFinite(MaximumSpawnDistance) || !FMath::IsFinite(Definition.SpawnSearchRadius))
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: non-finite authored distances | Min=%g Max=%g Radius=%g"),
+			MinimumSpawnDistance, MaximumSpawnDistance, Definition.SpawnSearchRadius);
+		return false;
+	}
+
+	if (MinimumSpawnDistance < 0.0f || MaximumSpawnDistance < 0.0f || Definition.SpawnSearchRadius < 0.0f)
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: negative authored distances | Min=%.0f Max=%.0f Radius=%.0f"),
+			MinimumSpawnDistance, MaximumSpawnDistance, Definition.SpawnSearchRadius);
 		return false;
 	}
 
@@ -86,7 +98,9 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 
 	const float MinDistanceSq	= FMath::Square(MinDistance);
 	const float MaxDistanceSq	= FMath::Square(MaxDistance);
-	float BestDistanceSq		= TNumericLimits<float>::Max();
+
+	AAmbientEncounterPoint* BestPoint	= nullptr;
+	double BestDistanceSq				= TNumericLimits<double>::Max();
 
 	for (TActorIterator<AAmbientEncounterPoint> PointIt(World); PointIt; ++PointIt)
 	{
@@ -108,23 +122,45 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 			continue;
 		}
 
-		if (DistanceSq < BestDistanceSq)
+		bool bIsBetter = DistanceSq < BestDistanceSq;
+
+		// ì •í™•ížˆ ê°™ì€ ê±°ë¦¬ì—ì„œë§Œ ì´ë¦„ê³¼ ê²½ë¡œë¥¼ ë¹„êµí•œë‹¤.
+		if (BestPoint && FMath::IsNearlyEqual(DistanceSq, BestDistanceSq))
 		{
+			const FName CandidateName = Point->GetPointName();
+			const FName CurrentName = BestPoint->GetPointName();
+
+			if (CandidateName != CurrentName)
+			{
+				bIsBetter = CandidateName.LexicalLess(CurrentName);
+			}
+			else
+			{
+				bIsBetter = Point->GetPathName().Compare(BestPoint->GetPathName(), ESearchCase::CaseSensitive) < 0;
+			}
+		}
+
+		if (bIsBetter)
+		{
+			BestPoint = Point;
 			BestDistanceSq	= DistanceSq;
-			OutBestPoint	= Point;
 		}
 	}
 
-	if (!IsValid(OutBestPoint))
+	if (!BestPoint)
 	{
-		OutReason = FString::Printf(TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"), MinDistance, MaxDistance);
+		OutReason = FString::Printf(
+			TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"),
+			MinDistance, MaxDistance);
 		return false;
 	}
 
-	OutDistanceToPoint	= FMath::Sqrt(BestDistanceSq);
-	OutSpawnTransform	= OutBestPoint->GetEncounterSpawnTransform();
-	OutReason			= FString::Printf(
-		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),*OutBestPoint->GetPointName().ToString(), OutDistanceToPoint);
+	OutBestPoint		= BestPoint;
+	OutSpawnTransform	= BestPoint->GetEncounterSpawnTransform();
+	OutDistanceToPoint	= static_cast<float>(FMath::Sqrt(BestDistanceSq));
+
+	OutReason = FString::Printf(TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
+		*BestPoint->GetPointName().ToString(), OutDistanceToPoint);
 
 	return true;
 
@@ -155,12 +191,11 @@ float AAmbientDirector::GetAutomaticEQSSpawnHeightOffset(const FAmbientEncounter
 }
 
 bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
-	const FAmbientEncounterDefinition& Definition,
-	FTransform& OutSpawnTransform,
-	float& OutDistanceToLocation,
-	FString& OutReason
-) const
+	const FAmbientEncounterDefinition& Definition, FTransform& OutSpawnTransform,
+	float& OutDistanceToLocation, FString& OutReason) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_FindEQSLocation);
+
 	OutSpawnTransform = FTransform::Identity;
 	OutDistanceToLocation = 0.0f;
 	OutReason = TEXT("No EQS query evaluated");
@@ -452,7 +487,7 @@ bool AAmbientDirector::DoesEncounterPointMatchDefinition(
 		return false;
 	}
 
-	// Region ÅÂ±×°¡ ¼³Á¤µÇ¾î ÀÖÀ¸¸é ±âÁ¸ Region ÀÌ¸§º¸´Ù ¿ì¼±ÇØ¼­ °Ë»çÇÑ´Ù.
+	// Region íƒœê·¸ê°€ ì„¤ì •ë˜ì–´ ìžˆìœ¼ë©´ ê¸°ì¡´ Region ì´ë¦„ë³´ë‹¤ ìš°ì„ í•´ì„œ ê²€ì‚¬í•œë‹¤.
 	if (Definition.RequiredRegionTag.IsValid())
 	{
 		if (!Point->GetRegionTag().MatchesTagExact(Definition.RequiredRegionTag))
@@ -465,7 +500,7 @@ bool AAmbientDirector::DoesEncounterPointMatchDefinition(
 		return false;
 	}
 
-	// ¿ä±¸ Point ÅÂ±×°¡ ºñ¾î ÀÖÀ¸¸é Point ÅÂ±× Á¶°ÇÀº ¾ø´Â °ÍÀ¸·Î Ã³¸®ÇÑ´Ù.
+	// ìš”êµ¬ Point íƒœê·¸ê°€ ë¹„ì–´ ìžˆìœ¼ë©´ Point íƒœê·¸ ì¡°ê±´ì€ ì—†ëŠ” ê²ƒìœ¼ë¡œ ì²˜ë¦¬í•œë‹¤.
 	return Point->GetPointTags().HasAllExact(Definition.RequiredPointTags);
 }
 
