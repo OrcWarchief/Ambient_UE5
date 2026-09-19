@@ -14,6 +14,7 @@
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
@@ -43,6 +44,8 @@ AAEDWildlifeEncounter::AAEDWildlifeEncounter()
 
 void AAEDWildlifeEncounter::InitializeAmbientEncounter_Implementation(const FAmbientEncounterRuntimeContext& Context)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_Wildlife_Initialize);
+
 	RuntimeContext = Context;
 	CachedDirector = Cast<AAmbientDirector>(Context.DirectorActor);
 
@@ -139,6 +142,8 @@ void AAEDWildlifeEncounter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool AAEDWildlifeEncounter::SpawnWildlifeMembers()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_Wildlife_SpawnMembers);
+
 	const int32 SafeMemberCount = FMath::Clamp(WildlifeMemberCount, 1, 8);
 
 	int32 ExistingValidMemberCount = 0;
@@ -175,6 +180,8 @@ bool AAEDWildlifeEncounter::SpawnWildlifeMembers()
 
 APawn* AAEDWildlifeEncounter::SpawnWildlifeMember(int32 MemberIndex)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_Wildlife_SpawnMember);
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -1388,6 +1395,8 @@ void AAEDWildlifeEncounter::ClearFleeResolutionTimer()
 
 void AAEDWildlifeEncounter::DestroyWildlifeMembers()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_Wildlife_DestroyMembers);
+
 	for (TObjectPtr<APawn>& WildlifeMember : SpawnedWildlifeMembers)
 	{
 		if (!IsValid(WildlifeMember))
@@ -1414,6 +1423,8 @@ void AAEDWildlifeEncounter::DestroyWildlifeMembers()
 
 void AAEDWildlifeEncounter::PrintWildlifeDebug(const FString& Message, bool bError) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_Wildlife_PrintDebug);
+
 	if (!bPrintWildlifeDebug)
 	{
 		return;

@@ -18,8 +18,8 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 		return true;
 	}
 
-	const int32 SafeMaxBudget = FMath::Max(0, MaxSimultaneousPrototypeEncounters);
-	const int32 CurrentBudgetUse = GetCurrentEncounterBudgetUse();
+	const int32 SafeMaxBudget		= FMath::Max(0, MaxSimultaneousPrototypeEncounters);
+	const int32 CurrentBudgetUse	= GetCurrentEncounterBudgetUse();
 
 	if (CurrentBudgetUse >= SafeMaxBudget)
 	{
@@ -43,8 +43,7 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 	}
 
 	const bool bShouldApplyRecentLocationSpacing =
-		bUseRecentEncounterSpacing &&
-		Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery;
+		bUseRecentEncounterSpacing && Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery;
 
 	if (bShouldApplyRecentLocationSpacing)
 	{
@@ -52,10 +51,7 @@ bool AAmbientDirector::DoesCandidatePassDirectorPacing(
 
 		OutNearestHistoryDistance = GetNearestRecentEncounterDistance(CandidateLocation);
 
-		if (
-			MinimumDistanceFromRecentEncounterLocations > 0.0f &&
-			OutNearestHistoryDistance < MinimumDistanceFromRecentEncounterLocations
-			)
+		if (MinimumDistanceFromRecentEncounterLocations > 0.0f && OutNearestHistoryDistance < MinimumDistanceFromRecentEncounterLocations)
 		{
 			OutReason = FString::Printf(
 				TEXT("Rejected: EQS location too close to recent EQS encounter %.0f < %.0f cm"),
@@ -105,11 +101,6 @@ float AAmbientDirector::GetGlobalPacingRemaining() const
 
 float AAmbientDirector::GetNearestRecentEncounterDistance(const FVector& CandidateLocation) const
 {
-	if (PrototypeEncounterHistory.Num() == 0)	//debug 반드시 필요한가? 없어도 될 듯?
-	{
-		return TNumericLimits<float>::Max();
-	}
-
 	float NearestDistance = TNumericLimits<float>::Max();
 
 	for (const FAmbientEncounterHistoryEntry& Entry : PrototypeEncounterHistory)

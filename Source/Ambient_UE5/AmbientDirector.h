@@ -84,12 +84,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Debug")
 	bool bDrawSelectedEncounterLocationDebug = true;
 
-	// ===== Spawn Prototype =====
+	// ===== Spawn Encounter =====
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float MinimumSpawnDistance = 500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
-	float MaximumSpawnDistance = 1200.0f;
+	float MaximumSpawnDistance = 3800.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Spawn Prototype", meta = (ClampMin = "0.0", Units = "cm"))
 	float GroundTraceUpDistance = 1000.0f;
@@ -201,16 +201,19 @@ protected:
 	bool bHasRuntimeEncounterDefinition = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	EAmbientEncounterRuntimeState PrototypeEncounterState = EAmbientEncounterRuntimeState::Waiting;
+	EAmbientEncounterRuntimeState EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	TArray<FAmbientEncounterHistoryEntry> PrototypeEncounterHistory;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	int32 PrototypeEncounterStartCount = 0;
+	TSet<FName> CompletedEncounterIds;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
-	int32 PrototypeEncounterFinishCount = 0;
+	int32 EncounterStartCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
+	int32 EncounterFinishCount = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ambient Director|Encounter Runtime")
 	FName RuntimeEncounterRegionName = NAME_None;
@@ -298,6 +301,8 @@ private:
 	bool ValidateEQSLocationCandidate(
 		const FVector& RawLocation,
 		const APawn* PlayerPawn,
+		float MinimumDistance,
+		float MaximumDistance,
 		float ClearanceRadius,
 		FVector& OutValidatedLocation,
 		FString& OutReason
@@ -361,7 +366,7 @@ private:
 
 	void SyncPrototypeRuntimeWorldState();
 
-	float GetDistanceFromPlayerToPrototypeEncounter() const;
+	bool TryGetDistanceFromPlayerToPrototypeEncounter(float& OutDistance) const;
 
 	FString GetPrototypeRuntimeStateString() const;
 

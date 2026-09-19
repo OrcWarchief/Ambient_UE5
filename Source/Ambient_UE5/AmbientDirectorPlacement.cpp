@@ -13,6 +13,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 bool AAmbientDirector::FindSpawnTransformForDefinition(
 	const FAmbientEncounterDefinition& Definition,
@@ -53,52 +54,58 @@ bool AAmbientDirector::FindSpawnTransformForDefinition(
 }
 
 bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
-	const FAmbientEncounterDefinition& Definition,
-	FTransform& OutSpawnTransform,
-	AAmbientEncounterPoint*& OutBestPoint,
-	float& OutDistanceToPoint,
-	FString& OutReason
-) const
+	const FAmbientEncounterDefinition& Definition, FTransform& OutSpawnTransform,
+	AAmbientEncounterPoint*& OutBestPoint, float& OutDistanceToPoint, FString& OutReason) const
 {
-	OutSpawnTransform = FTransform::Identity;
-	OutBestPoint = nullptr;
-	OutDistanceToPoint = 0.0f;
-	OutReason = TEXT("No authored point evaluated");
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_FindAuthoredPoint);
+
+	OutSpawnTransform	= FTransform::Identity;
+	OutBestPoint		= nullptr;
+	OutDistanceToPoint	= 0.0f;
 
 	UWorld* World = GetWorld();
-
 	if (!World)
 	{
 		OutReason = TEXT("Rejected: no world");
 		return false;
 	}
 
-	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(
-		Definition.EncounterPointSearchRadius,
-		MaximumSpawnDistance
-	);
+	if (!FMath::IsFinite(MinimumSpawnDistance) || !FMath::IsFinite(MaximumSpawnDistance) || !FMath::IsFinite(Definition.SpawnSearchRadius))
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: non-finite authored distances | Min=%g Max=%g Radius=%g"),
+			MinimumSpawnDistance, MaximumSpawnDistance, Definition.SpawnSearchRadius);
+		return false;
+	}
+
+	if (MinimumSpawnDistance < 0.0f || MaximumSpawnDistance < 0.0f || Definition.SpawnSearchRadius < 0.0f)
+	{
+		OutReason = FString::Printf(
+			TEXT("Rejected: negative authored distances | Min=%.0f Max=%.0f Radius=%.0f"),
+			MinimumSpawnDistance, MaximumSpawnDistance, Definition.SpawnSearchRadius);
+		return false;
+	}
+
+	const double MinDistance = MinimumSpawnDistance;
+	const double MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 
 	if (MaxDistance < MinDistance)
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: invalid authored-point distance range Min=%.0f Max=%.0f"),
-			MinDistance,
-			MaxDistance
-		);
+			MinDistance, MaxDistance);
 		return false;
 	}
 
-	const float MinDistanceSq = FMath::Square(MinDistance);
-	const float MaxDistanceSq = FMath::Square(MaxDistance);
+	const double MinDistanceSq = FMath::Square(MinDistance);
+	const double MaxDistanceSq = FMath::Square(MaxDistance);
 
-	float BestDistanceSq = TNumericLimits<float>::Max();
 	AAmbientEncounterPoint* BestPoint = nullptr;
+	double BestDistanceSq = TNumericLimits<double>::Max();
 
 	for (TActorIterator<AAmbientEncounterPoint> PointIt(World); PointIt; ++PointIt)
 	{
 		AAmbientEncounterPoint* Point = *PointIt;
-
 		if (!IsValid(Point) || !Point->IsPointEnabled())
 		{
 			continue;
@@ -109,44 +116,55 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 			continue;
 		}
 
-		const float DistanceSq = FVector::DistSquared2D(
-			CurrentWorldState.PlayerLocation,
-			Point->GetActorLocation()
-		);
+		const double DistanceSq = FVector::DistSquared2D(CurrentWorldState.PlayerLocation, Point->GetActorLocation());
 
 		if (DistanceSq < MinDistanceSq || DistanceSq > MaxDistanceSq)
 		{
 			continue;
 		}
 
-		if (DistanceSq < BestDistanceSq)
+		bool bIsBetter = DistanceSq < BestDistanceSq;
+
+		// 정확히 같은 거리에서만 이름과 경로를 비교한다.
+		if (BestPoint && DistanceSq == BestDistanceSq)
 		{
-			BestDistanceSq = DistanceSq;
+			const FName CandidateName = Point->GetPointName();
+			const FName CurrentName = BestPoint->GetPointName();
+
+			if (CandidateName != CurrentName)
+			{
+				bIsBetter = CandidateName.LexicalLess(CurrentName);
+			}
+			else
+			{
+				bIsBetter = Point->GetPathName().Compare(BestPoint->GetPathName(), ESearchCase::CaseSensitive) < 0;
+			}
+		}
+
+		if (bIsBetter)
+		{
 			BestPoint = Point;
+			BestDistanceSq	= DistanceSq;
 		}
 	}
 
-	if (!IsValid(BestPoint))
+	if (!BestPoint)
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: no authored point matched tags and distance %.0f-%.0f cm"),
-			MinDistance,
-			MaxDistance
-		);
+			MinDistance, MaxDistance);
 		return false;
 	}
 
-	OutBestPoint = BestPoint;
-	OutDistanceToPoint = FMath::Sqrt(BestDistanceSq);
-	OutSpawnTransform = BestPoint->GetEncounterSpawnTransform();
+	OutBestPoint		= BestPoint;
+	OutSpawnTransform	= BestPoint->GetEncounterSpawnTransform();
+	OutDistanceToPoint	= static_cast<float>(FMath::Sqrt(BestDistanceSq));
 
-	OutReason = FString::Printf(
-		TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
-		*BestPoint->GetPointName().ToString(),
-		OutDistanceToPoint
-	);
+	OutReason = FString::Printf(TEXT("AuthoredPoint accepted | Point=%s Distance=%.0f cm"),
+		*BestPoint->GetPointName().ToString(), OutDistanceToPoint);
 
 	return true;
+
 }
 
 float AAmbientDirector::GetAutomaticEQSSpawnHeightOffset(const FAmbientEncounterDefinition& Definition) const
@@ -174,17 +192,16 @@ float AAmbientDirector::GetAutomaticEQSSpawnHeightOffset(const FAmbientEncounter
 }
 
 bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
-	const FAmbientEncounterDefinition& Definition,
-	FTransform& OutSpawnTransform,
-	float& OutDistanceToLocation,
-	FString& OutReason
-) const
+	const FAmbientEncounterDefinition& Definition, FTransform& OutSpawnTransform,
+	float& OutDistanceToLocation, FString& OutReason) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_FindEQSLocation);
+
 	OutSpawnTransform = FTransform::Identity;
 	OutDistanceToLocation = 0.0f;
 	OutReason = TEXT("No EQS query evaluated");
 
-	if (!Definition.LocationQuery)
+	if (!Definition.EQSQuery)
 	{
 		OutReason = TEXT("Rejected: no EQS query defined");
 		return false;
@@ -213,20 +230,16 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 		return false;
 	}
 
-	FEnvQueryRequest QueryRequest(Definition.LocationQuery, PlayerPawn);
+	FEnvQueryRequest QueryRequest(Definition.EQSQuery, PlayerPawn);
 
 	EEnvQueryRunMode::Type QueryRunMode = Definition.EQSRunMode.GetValue();
 
-	if (Definition.bValidateEQSLocationWithDirectorRules)
+	if (Definition.bValidateEQSLocation)
 	{
 		QueryRunMode = EEnvQueryRunMode::AllMatching;
 	}
 
-	const TSharedPtr<FEnvQueryResult> QueryResult =
-		QueryManager->RunInstantQuery(
-			QueryRequest,
-			Definition.EQSRunMode.GetValue()
-		);
+	const TSharedPtr<FEnvQueryResult> QueryResult = QueryManager->RunInstantQuery(QueryRequest, QueryRunMode);
 
 	if (!QueryResult.IsValid())
 	{
@@ -246,8 +259,23 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 	const bool bHasClearanceOverride = Definition.EQSClearanceRadiusOverride > 0.0f;
 
-	const float EffectiveClearanceRadius =
-		FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
+	const float EffectiveClearanceRadius = FMath::Max(1.0f, bHasClearanceOverride ? Definition.EQSClearanceRadiusOverride : CandidateClearanceRadius);
+	const float EffectiveMinimumDistance = FMath::Max(0.0f, MinimumSpawnDistance);
+	const float EffectiveMaximumDistance = FMath::Min(FMath::Max(0.0f, Definition.SpawnSearchRadius), FMath::Max(0.0f, MaximumSpawnDistance));
+
+	if (EffectiveMaximumDistance < EffectiveMinimumDistance)
+	{
+		OutReason = FString::Printf(
+			TEXT(
+				"Rejected: invalid EQS distance range | "
+				"Min=%.0f Max=%.0f"
+			),
+			EffectiveMinimumDistance,
+			EffectiveMaximumDistance
+		);
+
+		return false;
+	}
 
 	FString FirstValidationFailure;
 	FString LastValidationFailure;
@@ -259,12 +287,14 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 
 		FString ValidationReason = TEXT("EQS location accepted without Director validation");
 
-		if (Definition.bValidateEQSLocationWithDirectorRules)
+		if (Definition.bValidateEQSLocation)
 		{
 			const bool bLocationPassedValidation =
 				ValidateEQSLocationCandidate(
 					RawEQSLocation,
 					PlayerPawn,
+					EffectiveMinimumDistance,
+					EffectiveMaximumDistance,
 					EffectiveClearanceRadius,
 					FinalLocation,
 					ValidationReason
@@ -357,6 +387,8 @@ bool AAmbientDirector::FindEQSSpawnTransformForDefinition(
 bool AAmbientDirector::ValidateEQSLocationCandidate(
 	const FVector& RawLocation,
 	const APawn* PlayerPawn,
+	float MinimumDistance,
+	float MaximumDistance,
 	float ClearanceRadius,
 	FVector& OutValidatedLocation,
 	FString& OutReason
@@ -395,22 +427,22 @@ bool AAmbientDirector::ValidateEQSLocationCandidate(
 		GroundLocation
 	);
 
-	if (Distance2D < MinimumSpawnDistance)
+	if (Distance2D < MinimumDistance)
 	{
 		OutReason = FString::Printf(
 			TEXT("EQS location too close: Dist=%.0f Min=%.0f"),
 			Distance2D,
-			MinimumSpawnDistance
+			MinimumDistance
 		);
 		return false;
 	}
 
-	if (Distance2D > MaximumSpawnDistance)
+	if (Distance2D > MaximumDistance)
 	{
 		OutReason = FString::Printf(
 			TEXT("EQS location too far: Dist=%.0f Max=%.0f"),
 			Distance2D,
-			MaximumSpawnDistance
+			MaximumDistance
 		);
 		return false;
 	}
@@ -456,37 +488,21 @@ bool AAmbientDirector::DoesEncounterPointMatchDefinition(
 		return false;
 	}
 
+	// Region 태그가 설정되어 있으면 기존 Region 이름보다 우선해서 검사한다.
 	if (Definition.RequiredRegionTag.IsValid())
 	{
-		const FGameplayTag PointRegionTag = Point->GetRegionTag();
-
-		if (!PointRegionTag.IsValid())
-		{
-			return false;
-		}
-
-		if (!PointRegionTag.MatchesTagExact(Definition.RequiredRegionTag))
+		if (!Point->GetRegionTag().MatchesTagExact(Definition.RequiredRegionTag))
 		{
 			return false;
 		}
 	}
-	else if (Definition.RequiredRegionName != NAME_None)
+	else if (Definition.RequiredRegionName != NAME_None && Point->GetRegionName() != Definition.RequiredRegionName)
 	{
-		if (Point->GetRegionName() != Definition.RequiredRegionName)
-		{
-			return false;
-		}
+		return false;
 	}
 
-	if (!Definition.RequiredPointTags.IsEmpty())
-	{
-		if (!Point->GetPointTags().HasAllExact(Definition.RequiredPointTags))
-		{
-			return false;
-		}
-	}
-
-	return true;
+	// 요구 Point 태그가 비어 있으면 Point 태그 조건은 없는 것으로 처리한다.
+	return Point->GetPointTags().HasAllExact(Definition.RequiredPointTags);
 }
 
 bool AAmbientDirector::ProjectPointToGround(

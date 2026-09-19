@@ -55,7 +55,7 @@ protected:
 	float ResolutionRadius = 650.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Stranded Traveler|Interaction")
-	FKey InteractKey = EKeys::O;
+	FKey InteractKey = EKeys::E;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AED|Stranded Traveler|Presentation")
 	FText InteractionPromptText = FText::FromString(TEXT("[E] Help the traveler"));

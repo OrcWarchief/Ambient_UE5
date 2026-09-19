@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 void AAmbientDirector::PrintWorldStateDebug() const
 {
@@ -82,17 +83,17 @@ void AAmbientDirector::PrintEncounterDebug() const
 		*RegionNameString,
 		*PointNameString,
 		*ActorString,
-		CurrentWorldState.DistanceToPrototypeEncounter,
-		CurrentWorldState.PrototypeCleanupRemaining,
-		CurrentWorldState.PrototypeCooldownRemaining,
-		PrototypeEncounterStartCount,
-		PrototypeEncounterFinishCount,
-		*CurrentWorldState.PrototypeEncounterRuntimeReason
+		CurrentWorldState.DistanceToEncounter,
+		CurrentWorldState.EncounterCleanupRemainingSeconds,
+		CurrentWorldState.EncounterCooldownRemainingSeconds,
+		EncounterStartCount,
+		EncounterFinishCount,
+		*CurrentWorldState.EncounterRuntimeReason
 	);
 
 	FColor MessageColor = FColor::Cyan;
 
-	switch (PrototypeEncounterState)
+	switch (EncounterRuntimeState)
 	{
 	case EAmbientEncounterRuntimeState::Waiting:
 		MessageColor = FColor::Yellow;
@@ -149,8 +150,8 @@ void AAmbientDirector::PrintEncounterHistoryDebug() const
 
 	const FString Message = FString::Printf(
 		TEXT("[AD] History | Starts=%d | Finishes=%d | Entries=%d | Last=%s"),
-		PrototypeEncounterStartCount,
-		PrototypeEncounterFinishCount,
+		EncounterStartCount,
+		EncounterFinishCount,
 		PrototypeEncounterHistory.Num(),
 		*LastHistoryString
 	);
@@ -323,15 +324,15 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 		*PacingString,
 		CurrentWorldState.CurrentEncounterBudgetUse,
 		CurrentWorldState.MaxEncounterBudget,
-		CurrentWorldState.GlobalPacingRemaining,
+		CurrentWorldState.GlobalPacingRemainingSeconds,
 		CurrentWorldState.NearestRecentEncounterDistance,
 
-		CurrentWorldState.DistanceToPrototypeEncounter,
-		CurrentWorldState.PrototypeCleanupRemaining,
-		CurrentWorldState.PrototypeCooldownRemaining,
+		CurrentWorldState.DistanceToEncounter,
+		CurrentWorldState.EncounterCleanupRemainingSeconds,
+		CurrentWorldState.EncounterCooldownRemainingSeconds,
 
-		PrototypeEncounterStartCount,
-		PrototypeEncounterFinishCount,
+		EncounterStartCount,
+		EncounterFinishCount,
 		PrototypeEncounterHistory.Num(),
 		*LastHistoryString,
 
@@ -346,11 +347,11 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 	{
 		DashboardColor = FColor::Orange;
 	}
-	else if (PrototypeEncounterState == EAmbientEncounterRuntimeState::Active)
+	else if (EncounterRuntimeState == EAmbientEncounterRuntimeState::Active)
 	{
 		DashboardColor = FColor::Green;
 	}
-	else if (PrototypeEncounterState == EAmbientEncounterRuntimeState::Cooldown)
+	else if (EncounterRuntimeState == EAmbientEncounterRuntimeState::Cooldown)
 	{
 		DashboardColor = FColor::Red;
 	}
@@ -367,8 +368,9 @@ void AAmbientDirector::PrintDirectorDashboardDebug() const
 
 void AAmbientDirector::DrawRegionDebug() const
 {
-	UWorld* World = GetWorld();
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_DrawRegionDebug);
 
+	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
@@ -439,8 +441,9 @@ void AAmbientDirector::DrawRegionDebug() const
 
 void AAmbientDirector::DrawEncounterPointDebug() const
 {
-	UWorld* World = GetWorld();
+	TRACE_CPUPROFILER_EVENT_SCOPE(AED_DrawEncounterPointDebug);
 
+	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
@@ -536,7 +539,7 @@ void AAmbientDirector::DrawEncounterRuntimeDebug() const
 
 	FColor StateColor = FColor::White;
 
-	switch (PrototypeEncounterState)
+	switch (EncounterRuntimeState)
 	{
 	case EAmbientEncounterRuntimeState::Waiting:
 		StateColor = FColor::Yellow;

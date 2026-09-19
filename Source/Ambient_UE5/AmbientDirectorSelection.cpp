@@ -18,19 +18,9 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	SelectedEncounterSpawnTransform = FTransform::Identity;
 	SelectedEncounterLocationReason = TEXT("No selected encounter location");
 
-	CurrentWorldState.bHasSelectedEncounterDefinition = false;
-	CurrentWorldState.SelectedEncounterDefinitionId = NAME_None;
-	CurrentWorldState.SelectedEncounterDefinitionScore = 0.0f;
-	CurrentWorldState.SelectedEncounterDefinitionReason = TEXT("No encounter definition selected");
-
 	CurrentWorldState.bHasSelectedEncounterPoint = false;
 	CurrentWorldState.SelectedEncounterPointName = NAME_None;
-	CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
-	CurrentWorldState.SelectedEncounterPointReason = TEXT("No encounter point evaluated");
-
 	CurrentWorldState.bHasSelectedEncounterLocation = false;
-	CurrentWorldState.SelectedEncounterLocation = FVector::ZeroVector;
-	CurrentWorldState.SelectedEncounterRotation = FRotator::ZeroRotator;
 	CurrentWorldState.SelectedEncounterLocationSource = TEXT("None");
 	CurrentWorldState.SelectedEncounterLocationReason = TEXT("No encounter location selected");
 
@@ -41,6 +31,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	FAmbientEncounterDefinition BestDefinition;
 	FTransform BestSpawnTransform = FTransform::Identity;
 	FString BestLocationReason = TEXT("No location");
+	FAmbientPacingResult BestPacingResult;
 
 	auto EvaluateDefinition = [&](const UAmbientEncounterDefinitionData* DefinitionAsset, const FAmbientEncounterDefinition& Definition)
 		{
@@ -71,6 +62,7 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 				BestDefinition = Definition;
 				BestSpawnTransform = CandidateSpawnTransform;
 				BestLocationReason = DebugEntry.LocationReason;
+				BestPacingResult = DebugEntry.PacingResult;
 			}
 		};
 
@@ -114,10 +106,6 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	if (!bFoundBestCandidate)
 	{
 		SelectedEncounterReason = TEXT("No accepted encounter definition candidate");
-
-		CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("No point selected because no definition candidate won");
 		CurrentWorldState.SelectedEncounterLocationReason =
 			TEXT("No location selected because no definition candidate won");
 		return;
@@ -130,46 +118,30 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 	SelectedEncounterScore = BestScore;
 	SelectedEncounterSpawnTransform = BestSpawnTransform;
 	bHasSelectedEncounterSpawnTransform = true;
-
-	SelectedEncounterReason = FString::Printf(
-		TEXT("Selected highest score candidate: %.1f"),
-		BestScore
-	);
-
-	CurrentWorldState.bHasSelectedEncounterDefinition = true;
-	CurrentWorldState.SelectedEncounterDefinitionId = BestDefinition.EncounterId;
-	CurrentWorldState.SelectedEncounterDefinitionScore = BestScore;
-	CurrentWorldState.SelectedEncounterDefinitionReason = SelectedEncounterReason;
+	SelectedEncounterReason = FString::Printf(TEXT("Selected highest score candidate: %.1f"), BestScore);
 
 	if (IsValid(BestPoint))
 	{
 		CurrentWorldState.bHasSelectedEncounterPoint = true;
 		CurrentWorldState.SelectedEncounterPointName = BestPoint->GetPointName();
-		CurrentWorldState.SelectedEncounterPointLocation = BestPoint->GetActorLocation();
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("Selected authored point from winning encounter definition");
 	}
 	else
 	{
 		CurrentWorldState.bHasSelectedEncounterPoint = false;
 		CurrentWorldState.SelectedEncounterPointName = NAME_None;
-		CurrentWorldState.SelectedEncounterPointLocation = FVector::ZeroVector;
-		CurrentWorldState.SelectedEncounterPointReason =
-			TEXT("Winning encounter used non-authored location source");
 	}
 
-	CurrentWorldState.bHasSelectedEncounterLocation = true;
-	CurrentWorldState.SelectedEncounterLocation =
-		BestSpawnTransform.GetLocation();
-	CurrentWorldState.SelectedEncounterRotation =
-		BestSpawnTransform.GetRotation().Rotator();
-
+	CurrentWorldState.bHasSelectedEncounterLocation	  = true;
 	CurrentWorldState.SelectedEncounterLocationSource =
 		BestDefinition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
 		? TEXT("EQS")
 		: TEXT("AuthoredPoint");
 
-	CurrentWorldState.SelectedEncounterLocationReason = BestLocationReason;
+	CurrentWorldState.SelectedEncounterLocationReason	= BestLocationReason;
+	CurrentWorldState.bPacingAllowsNewEncounter			= BestPacingResult.bPassed;
+	CurrentWorldState.PacingBlockReason					= BestPacingResult.Reason;
+	CurrentWorldState.GlobalPacingRemainingSeconds		= BestPacingResult.GlobalRemaining;
+	CurrentWorldState.NearestRecentEncounterDistance	= BestPacingResult.NearestHistoryDistance;
 }
 
 bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
@@ -182,18 +154,15 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	OutBestPoint = nullptr;
 	OutSpawnTransform = FTransform::Identity;
 
-	OutDebugEntry.bAccepted = false;
-	OutDebugEntry.EncounterId = Definition.EncounterId;
-	OutDebugEntry.PointName = NAME_None;
-	OutDebugEntry.Score = 0.0f;
-	OutDebugEntry.DistanceToPoint = 0.0f;
-	OutDebugEntry.Reason = TEXT("Not evaluated");
-	OutDebugEntry.LocationSource =
-		Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery
-		? TEXT("EQS")
-		: TEXT("AuthoredPoint");
-	OutDebugEntry.SelectedLocation = FVector::ZeroVector;
-	OutDebugEntry.LocationReason = TEXT("No location evaluated");
+	OutDebugEntry.bAccepted			= false;
+	OutDebugEntry.EncounterId		= Definition.EncounterId;
+	OutDebugEntry.PointName			= NAME_None;
+	OutDebugEntry.Score				= 0.0f;
+	OutDebugEntry.DistanceToPoint	= 0.0f;
+	OutDebugEntry.Reason			= TEXT("Not evaluated");
+	OutDebugEntry.LocationSource	= Definition.LocationSource == EAmbientEncounterLocationSource::EnvironmentQuery ? TEXT("EQS") : TEXT("AuthoredPoint");
+	OutDebugEntry.SelectedLocation	= FVector::ZeroVector;
+	OutDebugEntry.LocationReason	= TEXT("No location evaluated");
 
 	FString WorldMatchReason;
 
@@ -220,37 +189,34 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 		return false;
 	}
 
-	FString PacingReason;
-	float GlobalPacingRemaining = 0.0f;
-	float NearestHistoryDistance = 0.0f;
+	FAmbientPacingResult& PacingResult = OutDebugEntry.PacingResult;
+	PacingResult.bEvaluated = true;
 
-	if (!DoesCandidatePassDirectorPacing(
-		Definition,
-		OutSpawnTransform,
-		PacingReason,
-		GlobalPacingRemaining,
-		NearestHistoryDistance
-	))
+	PacingResult.bPassed =
+		DoesCandidatePassDirectorPacing(
+			Definition,
+			OutSpawnTransform,
+			PacingResult.Reason,
+			PacingResult.GlobalRemaining,
+			PacingResult.NearestHistoryDistance
+		);
+
+	if (!PacingResult.bPassed)
 	{
 		OutDebugEntry.Reason = FString::Printf(
 			TEXT("Rejected by Director pacing: %s"),
-			*PacingReason
+			*PacingResult.Reason
 		);
 
 		OutDebugEntry.LocationReason = LocationReason;
 		OutDebugEntry.SelectedLocation = OutSpawnTransform.GetLocation();
 		OutDebugEntry.DistanceToPoint = DistanceToLocation;
 
-		CurrentWorldState.bPacingAllowsNewEncounter = false;
-		CurrentWorldState.PacingBlockReason = PacingReason;
-		CurrentWorldState.GlobalPacingRemaining = GlobalPacingRemaining;
-		CurrentWorldState.NearestRecentEncounterDistance = NearestHistoryDistance;
-
 		return false;
 	}
 
 	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(Definition.EncounterPointSearchRadius, MaximumSpawnDistance);
+	const float MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 
 	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
 	const float DistanceAlpha = FMath::Clamp((DistanceToLocation - MinDistance) / DistanceRange, 0.0f, 1.0f);
@@ -258,7 +224,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	// 가까울수록 보너스
 	const float DistanceBonus				= (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
 	const bool bWasMostRecentlyCompleted	= WasMostRecentlyFinishedEncounter(Definition.EncounterId);
-	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.RecentlyCompletedPenalty : 0.0f;
+	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.LastFinishedEncounterPenalty : 0.0f;
 	const float FinalScore					= Definition.BaseSelectionScore + DistanceBonus - HistoryPenalty;
 
 	OutDebugEntry.bAccepted			= true;
@@ -266,11 +232,6 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	OutDebugEntry.DistanceToPoint	= DistanceToLocation;
 	OutDebugEntry.SelectedLocation	= OutSpawnTransform.GetLocation();
 	OutDebugEntry.LocationReason	= LocationReason;
-
-	CurrentWorldState.bPacingAllowsNewEncounter			= true;
-	CurrentWorldState.PacingBlockReason					= TEXT("Pacing passed");
-	CurrentWorldState.GlobalPacingRemaining				= GlobalPacingRemaining;
-	CurrentWorldState.NearestRecentEncounterDistance	= NearestHistoryDistance;
 
 	if (IsValid(OutBestPoint))
 	{
@@ -306,7 +267,7 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		return false;
 	}
 
-	if (Definition.bOneShotPerHistory && HasFinishedEncounter(Definition.EncounterId))
+	if (Definition.bOneShot && HasFinishedEncounter(Definition.EncounterId))
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: one-shot definition %s has already been completed"),
@@ -360,12 +321,12 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 		}
 	}
 
-	if (CurrentWorldState.PlayerSpeed2D > Definition.MaxPlayerSpeed)
+	if (CurrentWorldState.PlayerSpeed2D > Definition.MaxPlayerSpeed2D)
 	{
 		OutReason = FString::Printf(
 			TEXT("Rejected: player moving too fast %.0f > %.0f cm/s"),
 			CurrentWorldState.PlayerSpeed2D,
-			Definition.MaxPlayerSpeed
+			Definition.MaxPlayerSpeed2D
 		);
 		return false;
 	}
@@ -376,17 +337,7 @@ bool AAmbientDirector::DoesEncounterDefinitionMatchCurrentWorld(
 
 bool AAmbientDirector::HasFinishedEncounter(const FName EncounterId) const
 {
-	if (EncounterId == NAME_None)
-	{
-		return false;
-	}
-
-	return PrototypeEncounterHistory.ContainsByPredicate(
-		[EncounterId](const FAmbientEncounterHistoryEntry& HistoryEntry)
-		{
-			return HistoryEntry.EncounterId == EncounterId;
-		}
-	);
+	return EncounterId != NAME_None && CompletedEncounterIds.Contains(EncounterId);
 }
 
 bool AAmbientDirector::WasMostRecentlyFinishedEncounter(const FName EncounterId) const
