@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 void AAmbientDirector::PrintWorldStateDebug() const
 {

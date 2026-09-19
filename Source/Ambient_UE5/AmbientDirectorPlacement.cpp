@@ -13,6 +13,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 bool AAmbientDirector::FindSpawnTransformForDefinition(
 	const FAmbientEncounterDefinition& Definition,
@@ -85,8 +86,8 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 		return false;
 	}
 
-	const float MinDistance = MinimumSpawnDistance;
-	const float MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
+	const double MinDistance = MinimumSpawnDistance;
+	const double MaxDistance = FMath::Min(Definition.SpawnSearchRadius, MaximumSpawnDistance);
 
 	if (MaxDistance < MinDistance)
 	{
@@ -96,11 +97,11 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 		return false;
 	}
 
-	const float MinDistanceSq	= FMath::Square(MinDistance);
-	const float MaxDistanceSq	= FMath::Square(MaxDistance);
+	const double MinDistanceSq = FMath::Square(MinDistance);
+	const double MaxDistanceSq = FMath::Square(MaxDistance);
 
-	AAmbientEncounterPoint* BestPoint	= nullptr;
-	double BestDistanceSq				= TNumericLimits<double>::Max();
+	AAmbientEncounterPoint* BestPoint = nullptr;
+	double BestDistanceSq = TNumericLimits<double>::Max();
 
 	for (TActorIterator<AAmbientEncounterPoint> PointIt(World); PointIt; ++PointIt)
 	{
@@ -115,7 +116,7 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 			continue;
 		}
 
-		const float DistanceSq = FVector::DistSquared2D(CurrentWorldState.PlayerLocation, Point->GetActorLocation());
+		const double DistanceSq = FVector::DistSquared2D(CurrentWorldState.PlayerLocation, Point->GetActorLocation());
 
 		if (DistanceSq < MinDistanceSq || DistanceSq > MaxDistanceSq)
 		{
@@ -125,7 +126,7 @@ bool AAmbientDirector::FindAuthoredPointSpawnTransformForDefinition(
 		bool bIsBetter = DistanceSq < BestDistanceSq;
 
 		// 정확히 같은 거리에서만 이름과 경로를 비교한다.
-		if (BestPoint && FMath::IsNearlyEqual(DistanceSq, BestDistanceSq))
+		if (BestPoint && DistanceSq == BestDistanceSq)
 		{
 			const FName CandidateName = Point->GetPointName();
 			const FName CurrentName = BestPoint->GetPointName();

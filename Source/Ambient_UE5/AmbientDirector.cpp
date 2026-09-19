@@ -12,6 +12,7 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "ProfilingDebugging/MiscTrace.h"
 #include "TimerManager.h"
 
 AAmbientDirector::AAmbientDirector()
@@ -720,14 +721,12 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		RuntimeContext.StartedAtTimeSeconds = CurrentWorldState.GameTimeSeconds;
 		RuntimeContext.EncounterTags		= RuntimeEncounterDefinition.EncounterTags;
 
-		IAmbientEncounterRuntimeInterface::Execute_InitializeAmbientEncounter(
-			ActivePrototypeEncounter,
-			RuntimeContext
-		);
+		TRACE_BOOKMARK(TEXT("AED.Init | Encounter=%s | Class=%s"),
+			*RuntimeContext.EncounterId.ToString(),
+			*GetNameSafe(ActivePrototypeEncounter->GetClass()));
 
-		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterWaiting(
-			ActivePrototypeEncounter
-		);
+		IAmbientEncounterRuntimeInterface::Execute_InitializeAmbientEncounter(ActivePrototypeEncounter, RuntimeContext);
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterWaiting(ActivePrototypeEncounter);
 
 		if (bAutoSaveDirectorStateOnRuntimeChange)
 		{
