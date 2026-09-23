@@ -24,8 +24,7 @@ AAmbientDirector::AAmbientDirector()
 
 void AAmbientDirector::SetTraversalState(EAmbientTraversalState NewTraversalState, AActor* NewTraversalActor)
 {
-	if (NewTraversalState == EAmbientTraversalState::Mounted &&
-		!IsValid(NewTraversalActor))
+	if (NewTraversalState == EAmbientTraversalState::Mounted && !IsValid(NewTraversalActor))
 	{
 		ensureMsgf(false,
 			TEXT(
@@ -157,25 +156,27 @@ void AAmbientDirector::UpdateWorldState()
 	TRACE_CPUPROFILER_EVENT_SCOPE(AED_UpdateWorldState);
 
 	CurrentWorldState = FAmbientWorldState();
-	CurrentWorldState.CurrentEncounterBudgetUse		= GetCurrentEncounterBudgetUse();
-	CurrentWorldState.MaxEncounterBudget			= MaxSimultaneousPrototypeEncounters;
-	CurrentWorldState.GlobalPacingRemainingSeconds	= GetGlobalPacingRemaining();
+	CurrentWorldState.CurrentEncounterBudgetUse = GetCurrentEncounterBudgetUse();
+	CurrentWorldState.MaxEncounterBudget = MaxSimultaneousPrototypeEncounters;
+	CurrentWorldState.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
 
 	SyncTraversalWorldState();
 
-	CurrentRegion						= nullptr;
-	SelectedEncounterPoint				= nullptr;
-	SelectedEncounterDefinitionAsset	= nullptr;
+	CurrentRegion = nullptr;
 
-	bHasSelectedEncounterDefinition		= false;
-	SelectedEncounterDefinition			= FAmbientEncounterDefinition();
-	SelectedEncounterScore				= 0.0f;
-	SelectedEncounterReason				= TEXT("No encounter selected");
+	// 후보 평가를 건너뛰어도 이전 선택 결과가 남지 않도록 먼저 초기화한다.
+	SelectedEncounterPoint = nullptr;
+	SelectedEncounterDefinitionAsset = nullptr;
+
+	bHasSelectedEncounterDefinition = false;
+	SelectedEncounterDefinition = FAmbientEncounterDefinition();
+	SelectedEncounterScore = 0.0f;
+	SelectedEncounterReason = TEXT("No encounter selected");
 	LastSelectionDebugEntries.Reset();
 
 	bHasSelectedEncounterSpawnTransform = false;
-	SelectedEncounterSpawnTransform		= FTransform::Identity;
-	SelectedEncounterLocationReason		= TEXT("No selected encounter spawn transform");
+	SelectedEncounterSpawnTransform = FTransform::Identity;
+	SelectedEncounterLocationReason = TEXT("No selected encounter spawn transform");
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -208,6 +209,7 @@ void AAmbientDirector::UpdateWorldState()
 		CurrentWorldState.EncounterRuntimeReason	= TEXT("No player pawn");
 	}
 
+	// Pawn이 없어도 Cleanup과 Cooldown의 만료는 처리한다.
 	UpdatePrototypeEncounter();
 	SyncPrototypeRuntimeWorldState();
 	

@@ -73,6 +73,8 @@ void AAmbientNPCEncounterCharacter::OnAmbientEncounterActivated_Implementation()
 
 void AAmbientNPCEncounterCharacter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
+	StopBark();
+
 	FFormatNamedArguments Arguments;
 	Arguments.Add(TEXT("CleanupText"), CleanupText);
 	Arguments.Add(TEXT("Reason"), FText::AsCultureInvariant(Reason));

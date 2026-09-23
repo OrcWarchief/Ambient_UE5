@@ -6,23 +6,8 @@
 
 void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 {
-	SelectedEncounterPoint = nullptr;
-	SelectedEncounterDefinitionAsset = nullptr;
-
-	bHasSelectedEncounterDefinition = false;
-	SelectedEncounterDefinition = FAmbientEncounterDefinition();
-	SelectedEncounterScore = 0.0f;
 	SelectedEncounterReason = TEXT("No encounter definition selected");
-
-	bHasSelectedEncounterSpawnTransform = false;
-	SelectedEncounterSpawnTransform = FTransform::Identity;
 	SelectedEncounterLocationReason = TEXT("No selected encounter location");
-
-	CurrentWorldState.bHasSelectedEncounterPoint = false;
-	CurrentWorldState.SelectedEncounterPointName = NAME_None;
-	CurrentWorldState.bHasSelectedEncounterLocation = false;
-	CurrentWorldState.SelectedEncounterLocationSource = TEXT("None");
-	CurrentWorldState.SelectedEncounterLocationReason = TEXT("No encounter location selected");
 
 	bool bFoundBestCandidate = false;
 	float BestScore = 0.0f;
@@ -66,8 +51,8 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 			}
 		};
 
-	// ¿ì¼± ¹æ½Ä:
-	// ¿©·¯ Encounter Á¤ÀÇ ¿¡¼ÂÀ» ÈÄº¸·Î Æò°¡
+	// ìš°ì„  ë°©ì‹:
+	// ì—¬ëŸ¬ Encounter ì •ì˜ ì—ì…‹ì„ í›„ë³´ë¡œ í‰ê°€
 	for (const TObjectPtr<UAmbientEncounterDefinitionData>& DefinitionAsset : EncounterDefinitionAssets)
 	{
 		if (!IsValid(DefinitionAsset))
@@ -84,15 +69,15 @@ void AAmbientDirector::SelectEncounterDefinitionAndPoint()
 		EvaluateDefinition(DefinitionAsset.Get(), DefinitionAsset->Definition);
 	}
 
-	// ±âÁ¸ ´ÜÀÏ Encounter Á¤ÀÇ ¿¡¼Â fallback
-	// »õ ¹è¿­ÀÌ ºñ¾î ÀÖÀ» ¶§¸¸ »ç¿ë
+	// ê¸°ì¡´ ë‹¨ì¼ Encounter ì •ì˜ ì—ì…‹ fallback
+	// ìƒˆ ë°°ì—´ì´ ë¹„ì–´ ìˆì„ ë•Œë§Œ ì‚¬ìš©
 	if (EncounterDefinitionAssets.Num() == 0 && IsValid(PrototypeEncounterDefinitionAsset))
 	{
 		EvaluateDefinition(PrototypeEncounterDefinitionAsset.Get(), PrototypeEncounterDefinitionAsset->Definition);
 	}
 
-	// ÀÎ¶óÀÎ Encounter Á¤ÀÇ°ª fallback
-	// ¼³Á¤µÈ ¿¡¼ÂÀÌ ¾øÀ» ¶§¸¸ »ç¿ë
+	// ì¸ë¼ì¸ Encounter ì •ì˜ê°’ fallback
+	// ì„¤ì •ëœ ì—ì…‹ì´ ì—†ì„ ë•Œë§Œ ì‚¬ìš©
 	if (EncounterDefinitionAssets.Num() == 0 && !IsValid(PrototypeEncounterDefinitionAsset))
 	{
 		EvaluateDefinition(nullptr, PrototypeEncounterDefinition);
@@ -221,7 +206,7 @@ bool AAmbientDirector::EvaluateEncounterDefinitionCandidate(
 	const float DistanceRange = FMath::Max(1.0f, MaxDistance - MinDistance);
 	const float DistanceAlpha = FMath::Clamp((DistanceToLocation - MinDistance) / DistanceRange, 0.0f, 1.0f);
 
-	// °¡±î¿ï¼ö·Ï º¸³Ê½º
+	// ê°€ê¹Œìš¸ìˆ˜ë¡ ë³´ë„ˆìŠ¤
 	const float DistanceBonus				= (1.0f - DistanceAlpha) * Definition.DistanceScoreWeight;
 	const bool bWasMostRecentlyCompleted	= WasMostRecentlyFinishedEncounter(Definition.EncounterId);
 	const float HistoryPenalty				= bWasMostRecentlyCompleted ? Definition.LastFinishedEncounterPenalty : 0.0f;

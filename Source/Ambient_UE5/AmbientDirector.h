@@ -27,13 +27,22 @@ public:
 	void SetTraversalState(EAmbientTraversalState NewTraversalState, AActor* NewTraversalActor);
 
 	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
-	EAmbientTraversalState GetTraversalState() const { return TraversalState; }
+	EAmbientTraversalState GetTraversalState() const
+	{
+		return TraversalState;
+	}
 
 	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
-	bool IsPlayerMounted() const { return TraversalState == EAmbientTraversalState::Mounted; }
+	bool IsPlayerMounted() const
+	{
+		return TraversalState == EAmbientTraversalState::Mounted;
+	}
 
 	UFUNCTION(BlueprintPure, Category = "Ambient Director|Traversal")
-	AActor* GetTraversalActor() const { return TraversalActor.Get(); }
+	AActor* GetTraversalActor() const
+	{
+		return TraversalActor.Get();
+	}
 
 	UFUNCTION(BlueprintCallable, Category = "Ambient Director|Encounter Runtime")
 	bool RequestActiveEncounterResolution(AActor* RequestingEncounter, const FString& FinishReason);
@@ -108,17 +117,17 @@ protected:
 
 	// ===== Encounter Definition =====
 
-	// Slice 22 ÀÌÈÄ ±ÇÀå ¹æ½Ä
-	// Director°¡ ¿©·¯ Encounter Á¤ÀÇ ¿¡¼ÂÀ» Æò°¡ ÈÄ ÃÖÀûÀÇ ¿¡¼Â ¼±ÅÃ
+	// Slice 22 ì´í›„ ê¶Œì¥ ë°©ì‹
+	// Directorê°€ ì—¬ëŸ¬ Encounter ì •ì˜ ì—ì…‹ì„ í‰ê°€ í›„ ìµœì ì˜ ì—ì…‹ ì„ íƒ
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
 	TArray<TObjectPtr<UAmbientEncounterDefinitionData>> EncounterDefinitionAssets;
 
-	// ±âÁ¸ ´ÜÀÏ Encounter Á¤ÀÇ ¿¡¼Â fallback
-	// ¹è¿­ÀÌ ºñ¾î ÀÖÀ» ¶§ ÀÌÀü ¼³Á¤ È£È¯¿ëÀ¸·Î »ç¿ë
+	// ê¸°ì¡´ ë‹¨ì¼ Encounter ì •ì˜ ì—ì…‹ fallback
+	// ë°°ì—´ì´ ë¹„ì–´ ìˆì„ ë•Œ ì´ì „ ì„¤ì • í˜¸í™˜ìš©ìœ¼ë¡œ ì‚¬ìš©
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
 	TObjectPtr<UAmbientEncounterDefinitionData> PrototypeEncounterDefinitionAsset = nullptr;
 
-	// Data AssetÀÌ ¾øÀ» ¶§ »ç¿ëÇÒ ÀÎ¶óÀÎ Encounter Á¤ÀÇ°ª
+	// Data Assetì´ ì—†ì„ ë•Œ ì‚¬ìš©í•  ì¸ë¼ì¸ Encounter ì •ì˜ê°’
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Director|Encounter Definition")
 	FAmbientEncounterDefinition PrototypeEncounterDefinition;
 
@@ -262,6 +271,10 @@ private:
 
 	void UpdateCurrentRegion(const APawn* PlayerPawn);
 
+	/**
+	 * í˜„ì¬ ì›”ë“œ ìƒíƒœì— ë§ëŠ” Encounter í›„ë³´ì™€ ë°°ì¹˜ ìœ„ì¹˜ë¥¼ ì„ íƒí•œ í›„
+	 * UpdateWorldStateì—ì„œ ì„ íƒ ì •ë³´ë¥¼ ì´ˆê¸°í™”, í”Œë ˆì´ì–´Â·ë¦¬ì „ ì •ë³´ë¥¼ ìˆ˜ì§‘í•œ ë’¤ í˜¸ì¶œ.
+	 */
 	void SelectEncounterDefinitionAndPoint();
 
 	bool EvaluateEncounterDefinitionCandidate(
