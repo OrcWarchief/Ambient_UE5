@@ -398,7 +398,6 @@ bool AAmbientDirector::RestoreRuntimeEncounterFromSave(
 	RuntimeContext.RegionName = RuntimeEncounterRegionName;
 	RuntimeContext.SourcePointName = RuntimeEncounterPointName;
 	RuntimeContext.SpawnLocation = Snapshot.RuntimeEncounterLocation;
-	RuntimeContext.StartedAtTimeSeconds = RuntimeEncounterStartedAtTimeSeconds;
 	RuntimeContext.EncounterTags = RestoredDefinition.EncounterTags;
 
 	IAmbientEncounterRuntimeInterface::

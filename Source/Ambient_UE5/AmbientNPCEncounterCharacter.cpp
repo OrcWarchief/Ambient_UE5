@@ -3,6 +3,7 @@
 
 #include "AmbientNPCEncounterCharacter.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -13,6 +14,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogAmbientNPCEncounter, Log, All);
 
 AAmbientNPCEncounterCharacter::AAmbientNPCEncounterCharacter()
 {
@@ -49,18 +52,12 @@ AAmbientNPCEncounterCharacter::AAmbientNPCEncounterCharacter()
 	FloatingText->SetText(FText::FromString(TEXT("NPC")));
 }
 
-void AAmbientNPCEncounterCharacter::InitializeAmbientEncounter_Implementation(
-	const FAmbientEncounterRuntimeContext& Context
-)
+void AAmbientNPCEncounterCharacter::InitializeAmbientEncounter_Implementation(const FAmbientEncounterRuntimeContext& Context)
 {
+	StopBark();
+
 	RuntimeContext = Context;
 	bHasPlayedBark = false;
-
-	SetFloatingText(FText::FromString(FString::Printf(
-		TEXT("NPC Waiting\n%s\n%s"),
-		*RuntimeContext.EncounterId.ToString(),
-		*RuntimeContext.SourcePointName.ToString()
-	)));
 }
 
 void AAmbientNPCEncounterCharacter::OnAmbientEncounterWaiting_Implementation()
@@ -74,25 +71,34 @@ void AAmbientNPCEncounterCharacter::OnAmbientEncounterActivated_Implementation()
 	PlayBark();
 }
 
-void AAmbientNPCEncounterCharacter::OnAmbientEncounterCleanup_Implementation(
-	const FString& Reason
-)
+void AAmbientNPCEncounterCharacter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
-	SetFloatingText(FText::FromString(FString::Printf(
-		TEXT("%s\nReason: %s"),
-		*CleanupText.ToString(),
-		*Reason
-	)));
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CleanupText"), CleanupText);
+	Arguments.Add(TEXT("Reason"), FText::AsCultureInvariant(Reason));
+
+	const FText CleanupMessage = FText::Format(
+		NSLOCTEXT(
+			"AmbientNPCEncounter",
+			"CleanupMessageFormat",
+			"{CleanupText}\nReason: {Reason}"),
+		Arguments);
+
+	SetFloatingText(CleanupMessage);
 }
 
-void AAmbientNPCEncounterCharacter::OnAmbientEncounterFinished_Implementation(
-	const FString& Reason
-)
+void AAmbientNPCEncounterCharacter::OnAmbientEncounterFinished_Implementation(const FString& Reason)
 {
-	SetFloatingText(FText::FromString(FString::Printf(
-		TEXT("NPC Finished\n%s"),
-		*Reason
-	)));
+	StopBark();
+
+	UE_LOG(LogAmbientNPCEncounter, Log, TEXT("Finished notification | Encounter=%s | Reason=%s"), *RuntimeContext.EncounterId.ToString(), *Reason);
+}
+
+void AAmbientNPCEncounterCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	StopBark();
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AAmbientNPCEncounterCharacter::SetFloatingText(const FText& NewText)
@@ -136,28 +142,31 @@ void AAmbientNPCEncounterCharacter::PlayBark()
 
 	if (BarkSound)
 	{
-		UGameplayStatics::PlaySoundAtLocation(
-			this,
-			BarkSound,
-			GetActorLocation()
-		);
+		ActiveBarkAudioComponent = UGameplayStatics::SpawnSoundAtLocation(this, BarkSound, GetActorLocation());
 	}
+
+	const FString Message = FString::Printf(TEXT("[AD] NPC Bark | %s | %s"),
+		*RuntimeContext.EncounterId.ToString(),*BarkText.ToString());
+
+	UE_LOG(LogAmbientNPCEncounter, Log, TEXT("%s"), *Message);
 
 	if (bPrintBarkToScreen && GEngine)
 	{
-		const FString Message = FString::Printf(
-			TEXT("[AD] NPC Bark | %s | %s"),
-			*RuntimeContext.EncounterId.ToString(),
-			*BarkText.ToString()
-		);
-
 		GEngine->AddOnScreenDebugMessage(
 			2001,
 			2.5f,
 			FColor::White,
 			Message
 		);
-
-		UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
 	}
+}
+
+void AAmbientNPCEncounterCharacter::StopBark()
+{
+	if (IsValid(ActiveBarkAudioComponent))
+	{
+		ActiveBarkAudioComponent->Stop();
+	}
+
+	ActiveBarkAudioComponent = nullptr;
 }

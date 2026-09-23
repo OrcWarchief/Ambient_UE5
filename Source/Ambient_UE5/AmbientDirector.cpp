@@ -718,7 +718,6 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 		RuntimeContext.RegionName			= RuntimeEncounterRegionName;
 		RuntimeContext.SourcePointName		= RuntimeEncounterPointName;
 		RuntimeContext.SpawnLocation		= SpawnTransform.GetLocation();
-		RuntimeContext.StartedAtTimeSeconds = CurrentWorldState.GameTimeSeconds;
 		RuntimeContext.EncounterTags		= RuntimeEncounterDefinition.EncounterTags;
 
 		TRACE_BOOKMARK(TEXT("AED.Init | Encounter=%s | Class=%s"),

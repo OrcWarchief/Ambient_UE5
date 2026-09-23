@@ -9,6 +9,8 @@
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogAmbientPlaceholderEncounter, Log, All);
+
 AAmbientPlaceholderEncounter::AAmbientPlaceholderEncounter()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -42,70 +44,34 @@ AAmbientPlaceholderEncounter::AAmbientPlaceholderEncounter()
 	}
 }
 
-void AAmbientPlaceholderEncounter::InitializePrototypeEncounter(
-	const FName InEncounterId,
-	const FName InRegionName,
-	const FName InSourcePointName
-)
-{
-	EncounterId = InEncounterId;
-	SpawnRegionName = InRegionName;
-	SourcePointName = InSourcePointName;
-
-	SetStateText(FString::Printf(
-		TEXT("Placeholder\n%s\n%s"),
-		*EncounterId.ToString(),
-		*SourcePointName.ToString()
-	));
-}
-
-void AAmbientPlaceholderEncounter::InitializeAmbientEncounter_Implementation(
-	const FAmbientEncounterRuntimeContext& Context
-)
+void AAmbientPlaceholderEncounter::InitializeAmbientEncounter_Implementation(const FAmbientEncounterRuntimeContext& Context)
 {
 	RuntimeContext = Context;
 
-	InitializePrototypeEncounter(
-		Context.EncounterId,
-		Context.RegionName,
-		Context.SourcePointName
-	);
+	SetStateText(FString::Printf(TEXT("Placeholder\n%s\n%s"),
+		*RuntimeContext.EncounterId.ToString(), *RuntimeContext.SourcePointName.ToString()));
 }
 
 void AAmbientPlaceholderEncounter::OnAmbientEncounterWaiting_Implementation()
 {
-	SetStateText(FString::Printf(
-		TEXT("Placeholder Waiting\n%s"),
-		*EncounterId.ToString()
-	));
+	SetStateText(FString::Printf(TEXT("Placeholder Waiting\n%s"),
+		*RuntimeContext.EncounterId.ToString()));
 }
 
 void AAmbientPlaceholderEncounter::OnAmbientEncounterActivated_Implementation()
 {
-	SetStateText(FString::Printf(
-		TEXT("Placeholder Active\n%s"),
-		*EncounterId.ToString()
-	));
+	SetStateText(FString::Printf(TEXT("Placeholder Active\n%s"),
+		*RuntimeContext.EncounterId.ToString()));
 }
 
-void AAmbientPlaceholderEncounter::OnAmbientEncounterCleanup_Implementation(
-	const FString& Reason
-)
+void AAmbientPlaceholderEncounter::OnAmbientEncounterCleanup_Implementation(const FString& Reason)
 {
-	SetStateText(FString::Printf(
-		TEXT("Placeholder Cleanup\n%s"),
-		*Reason
-	));
+	SetStateText(FString::Printf(TEXT("Placeholder Cleanup\n%s"),*Reason));
 }
 
-void AAmbientPlaceholderEncounter::OnAmbientEncounterFinished_Implementation(
-	const FString& Reason
-)
+void AAmbientPlaceholderEncounter::OnAmbientEncounterFinished_Implementation(const FString& Reason)
 {
-	SetStateText(FString::Printf(
-		TEXT("Placeholder Finished\n%s"),
-		*Reason
-	));
+	UE_LOG(LogAmbientPlaceholderEncounter, Log, TEXT("Finished notification | Encounter=%s | Reason=%s"), *RuntimeContext.EncounterId.ToString(), *Reason);
 }
 
 void AAmbientPlaceholderEncounter::SetStateText(const FString& Text)
