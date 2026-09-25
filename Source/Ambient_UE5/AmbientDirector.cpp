@@ -153,18 +153,28 @@ void AAmbientDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AAmbientDirector::UpdateWorldState()
 {
+	if (bIsUpdatingWorldState)
+	{
+		return;
+	}
+
+	// Prevent callbacks from restarting the update while it is in progress.
+	TGuardValue<bool> UpdateGuard(bIsUpdatingWorldState, true);
+
+	// Temporary re-entry test. Remove after verification.
+	UpdateWorldState();
+
 	TRACE_CPUPROFILER_EVENT_SCOPE(AED_UpdateWorldState);
 
 	CurrentWorldState = FAmbientWorldState();
 	CurrentWorldState.CurrentEncounterBudgetUse = GetCurrentEncounterBudgetUse();
 	CurrentWorldState.MaxEncounterBudget = MaxSimultaneousPrototypeEncounters;
-	CurrentWorldState.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
 
 	SyncTraversalWorldState();
 
 	CurrentRegion = nullptr;
 
-	// 후보 평가를 건너뛰어도 이전 선택 결과가 남지 않도록 먼저 초기화한다.
+	// 후보 평가를 건너뛰어도 이전 선택 결과가 남지 않도록 먼저 초기화.
 	SelectedEncounterPoint = nullptr;
 	SelectedEncounterDefinitionAsset = nullptr;
 
@@ -189,24 +199,25 @@ void AAmbientDirector::UpdateWorldState()
 		return;
 	}
 
-	CurrentWorldState.GameTimeSeconds	= World->GetTimeSeconds();
+	CurrentWorldState.GameTimeSeconds = World->GetTimeSeconds();
+	CurrentWorldState.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
 
-	APawn* PlayerPawn					= UGameplayStatics::GetPlayerPawn(World, 0);
-	CurrentWorldState.bHasPlayerPawn	= IsValid(PlayerPawn);
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+	CurrentWorldState.bHasPlayerPawn = IsValid(PlayerPawn);
 
 	if (CurrentWorldState.bHasPlayerPawn)
 	{
-		CurrentWorldState.PlayerLocation	= PlayerPawn->GetActorLocation();
-		CurrentWorldState.PlayerSpeed2D		= PlayerPawn->GetVelocity().Size2D();
+		CurrentWorldState.PlayerLocation = PlayerPawn->GetActorLocation();
+		CurrentWorldState.PlayerSpeed2D	= PlayerPawn->GetVelocity().Size2D();
 
-		UpdateCurrentRegion(PlayerPawn);
+		UpdateCurrentRegion(CurrentWorldState.PlayerLocation);
 		SelectEncounterDefinitionAndPoint();
 		EvaluatePrototypeEncounterCondition();
 	}
 	else
 	{
-		CurrentWorldState.EncounterBlockReason		= TEXT("No player pawn");
-		CurrentWorldState.EncounterRuntimeReason	= TEXT("No player pawn");
+		CurrentWorldState.EncounterBlockReason = TEXT("No player pawn");
+		CurrentWorldState.EncounterRuntimeReason = TEXT("No player pawn");
 	}
 
 	// Pawn이 없어도 Cleanup과 Cooldown의 만료는 처리한다.
@@ -259,7 +270,7 @@ void AAmbientDirector::UpdateWorldState()
 	}
 }
 
-void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
+void AAmbientDirector::UpdateCurrentRegion(const FVector& QueryLocation)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AED_UpdateCurrentRegion);
 
@@ -268,13 +279,12 @@ void AAmbientDirector::UpdateCurrentRegion(const APawn* PlayerPawn)
 	CurrentWorldState.CurrentRegionName = NAME_None;
 
 	UWorld* World = GetWorld();
-	if (!World || !IsValid(PlayerPawn))
+	if (!World)
 	{
 		return;
 	}
 
-	const FVector QueryLocation			= CurrentWorldState.PlayerLocation;
-	AAmbientRegionVolume* BestRegion	= nullptr;
+	AAmbientRegionVolume* BestRegion = nullptr;
 
 	for (TActorIterator<AAmbientRegionVolume> RegionIt(World); RegionIt; ++RegionIt)
 	{
@@ -327,8 +337,6 @@ bool AAmbientDirector::ShouldDrawRuntimeDebug() const
 
 void AAmbientDirector::EvaluatePrototypeEncounterCondition()
 {
-	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
-
 	CurrentWorldState.bEncounterConditionsMet = false;
 	CurrentWorldState.EncounterBlockReason = TEXT("Prototype condition not evaluated");
 
@@ -338,6 +346,8 @@ void AAmbientDirector::EvaluatePrototypeEncounterCondition()
 			TEXT("No selected encounter definition");
 		return;
 	}
+
+	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
 
 	if (!Definition.bEnabled)
 	{
@@ -400,11 +410,22 @@ void AAmbientDirector::UpdatePrototypeEncounter()
 				return;
 			}
 
-			// Encounter 발생 조건은 만족
-			// Spawn 또는 Update 실패 시 RuntimeReason 기록 후 종료
-			if (!TrySpawnOrUpdatePrototypeEncounter())
+			const EAmbientEncounterPreparationResult PreparationResult = TrySpawnOrUpdatePrototypeEncounter();
+
+			if (PreparationResult != EAmbientEncounterPreparationResult::Ready)
 			{
-				CurrentWorldState.EncounterRuntimeReason = TEXT("Failed to spawn or update prototype encounter");
+				if (PreparationResult == EAmbientEncounterPreparationResult::Failed)
+				{
+					CurrentWorldState.EncounterRuntimeReason = CurrentWorldState.EncounterBlockReason;
+				}
+				else if (EncounterRuntimeState == EAmbientEncounterRuntimeState::Waiting &&
+					bHasRuntimeEncounterDefinition && !IsValid(ActivePrototypeEncounter))
+				{
+					// Cancel orphaned preparation data without recording a completion.
+					RemoveWaitingPrototypeEncounter(TEXT("Encounter actor became invalid during preparation"));
+				}
+
+				// Preserve any state transition or replacement made by the callback.
 				return;
 			}
 		}
@@ -619,14 +640,18 @@ const FAmbientEncounterDefinition& AAmbientDirector::GetPrototypeEncounterDefini
 	return PrototypeEncounterDefinition;
 }
 
-bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
+EAmbientEncounterPreparationResult AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 {
+	if (EncounterRuntimeState != EAmbientEncounterRuntimeState::Waiting)
+	{
+		return EAmbientEncounterPreparationResult::Interrupted;
+	}
+
 	if (!bHasSelectedEncounterDefinition && !bHasRuntimeEncounterDefinition)
 	{
 		CurrentWorldState.bEncounterConditionsMet = false;
-		CurrentWorldState.EncounterBlockReason =
-			TEXT("No selected encounter definition");
-		return false;
+		CurrentWorldState.EncounterBlockReason = TEXT("No selected encounter definition");
+		return EAmbientEncounterPreparationResult::Failed;
 	}
 
 	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
@@ -634,126 +659,142 @@ bool AAmbientDirector::TrySpawnOrUpdatePrototypeEncounter()
 	if (!Definition.EncounterClass)
 	{
 		CurrentWorldState.bEncounterConditionsMet = false;
-		CurrentWorldState.EncounterBlockReason =
-			TEXT("EncounterClass is not assigned in definition");
-		return false;
+		CurrentWorldState.EncounterBlockReason = TEXT("EncounterClass is not assigned in definition");
+		return EAmbientEncounterPreparationResult::Failed;
 	}
 
-	if (!Definition.EncounterClass->ImplementsInterface(
-		UAmbientEncounterRuntimeInterface::StaticClass()
-	))
+	if (!Definition.EncounterClass->ImplementsInterface(UAmbientEncounterRuntimeInterface::StaticClass()))
 	{
 		CurrentWorldState.bEncounterConditionsMet = false;
 		CurrentWorldState.EncounterBlockReason = FString::Printf(
 			TEXT("EncounterClass %s does not implement AmbientEncounterRuntimeInterface"),
-			*GetNameSafe(Definition.EncounterClass.Get())
-		);
-		return false;
+			*GetNameSafe(Definition.EncounterClass.Get()));
+		return EAmbientEncounterPreparationResult::Failed;
 	}
 
-	if (!bHasSelectedEncounterSpawnTransform && !IsValid(ActivePrototypeEncounter))
+	const bool bNeedsSpawn = !IsValid(ActivePrototypeEncounter);
+
+	if (bNeedsSpawn && !bHasSelectedEncounterSpawnTransform)
 	{
 		CurrentWorldState.bEncounterConditionsMet = false;
-		CurrentWorldState.EncounterBlockReason =
-			TEXT("Selected encounter spawn transform is invalid");
-		return false;
+		CurrentWorldState.EncounterBlockReason = TEXT("Selected encounter spawn transform is invalid");
+		return EAmbientEncounterPreparationResult::Failed;
 	}
 
-	UWorld* World = GetWorld();
-
+	UWorld* const World = GetWorld();
 	if (!World)
 	{
 		CurrentWorldState.bEncounterConditionsMet = false;
 		CurrentWorldState.EncounterBlockReason = TEXT("No world");
-		return false;
+		return EAmbientEncounterPreparationResult::Failed;
 	}
 
+	TWeakObjectPtr<AActor> PreparedEncounter(ActivePrototypeEncounter.Get());
 
-	if (!IsValid(ActivePrototypeEncounter))
+	if (bNeedsSpawn)
 	{
-		if (!bHasSelectedEncounterSpawnTransform)
-		{
-			CurrentWorldState.EncounterBlockReason =
-				TEXT("Cannot spawn because selected spawn transform is missing");
-			return false;
-		}
-
 		const FAmbientEncounterDefinition PendingRuntimeDefinition = Definition;
 		const FTransform SpawnTransform = SelectedEncounterSpawnTransform;
 
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.Owner = this;
-		SpawnParams.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-		AActor* SpawnedEncounter = World->SpawnActor<AActor>(
-			PendingRuntimeDefinition.EncounterClass,
-			SpawnTransform, SpawnParams);
+		AActor* const SpawnedEncounter = World->SpawnActor<AActor>(
+			PendingRuntimeDefinition.EncounterClass, SpawnTransform, SpawnParams);
 
 		if (!IsValid(SpawnedEncounter))
 		{
 			ActivePrototypeEncounter = nullptr;
 			RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 			bHasRuntimeEncounterDefinition = false;
+			CurrentWorldState.bEncounterConditionsMet = false;
 			CurrentWorldState.EncounterBlockReason = TEXT("Spawn failed");
-			return false;
+			return EAmbientEncounterPreparationResult::Failed;
 		}
 
 		ActivePrototypeEncounter = SpawnedEncounter;
+		PreparedEncounter = SpawnedEncounter;
 		RuntimeEncounterDefinition = PendingRuntimeDefinition;
 		bHasRuntimeEncounterDefinition = true;
 
-		RuntimeEncounterRegionName		= CurrentWorldState.CurrentRegionName;
-		RuntimeEncounterPointName		= IsValid(SelectedEncounterPoint)
+		RuntimeEncounterRegionName = CurrentWorldState.CurrentRegionName;
+		RuntimeEncounterPointName = IsValid(SelectedEncounterPoint)
 			? SelectedEncounterPoint->GetPointName()
 			: FName(TEXT("Location.EQS"));
-
-		RuntimeEncounterLocation		= SpawnTransform.GetLocation();
-		RuntimeEncounterLocationSource	=
-			CurrentWorldState.SelectedEncounterLocationSource.IsEmpty()
+		RuntimeEncounterLocation = SpawnTransform.GetLocation();
+		RuntimeEncounterLocationSource = CurrentWorldState.SelectedEncounterLocationSource.IsEmpty()
 			? TEXT("Unknown")
 			: CurrentWorldState.SelectedEncounterLocationSource;
 
 		FAmbientEncounterRuntimeContext RuntimeContext;
-		RuntimeContext.DirectorActor		= this;
-		RuntimeContext.EncounterId			= RuntimeEncounterDefinition.EncounterId;
-		RuntimeContext.RegionName			= RuntimeEncounterRegionName;
-		RuntimeContext.SourcePointName		= RuntimeEncounterPointName;
-		RuntimeContext.SpawnLocation		= SpawnTransform.GetLocation();
-		RuntimeContext.EncounterTags		= RuntimeEncounterDefinition.EncounterTags;
+		RuntimeContext.DirectorActor = this;
+		RuntimeContext.EncounterId = RuntimeEncounterDefinition.EncounterId;
+		RuntimeContext.RegionName = RuntimeEncounterRegionName;
+		RuntimeContext.SourcePointName = RuntimeEncounterPointName;
+		RuntimeContext.SpawnLocation = SpawnTransform.GetLocation();
+		RuntimeContext.EncounterTags = RuntimeEncounterDefinition.EncounterTags;
 
 		TRACE_BOOKMARK(TEXT("AED.Init | Encounter=%s | Class=%s"),
-			*RuntimeContext.EncounterId.ToString(),
-			*GetNameSafe(ActivePrototypeEncounter->GetClass()));
+			*RuntimeContext.EncounterId.ToString(), *GetNameSafe(SpawnedEncounter->GetClass()));
 
-		IAmbientEncounterRuntimeInterface::Execute_InitializeAmbientEncounter(ActivePrototypeEncounter, RuntimeContext);
-		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterWaiting(ActivePrototypeEncounter);
+		IAmbientEncounterRuntimeInterface::Execute_InitializeAmbientEncounter(SpawnedEncounter, RuntimeContext);
 
-		if (bAutoSaveDirectorStateOnRuntimeChange)
+		// Initialization may remove the actor, replace it, or advance the state.
+		AActor* const InitializedEncounter = PreparedEncounter.Get();
+		if (!InitializedEncounter || ActivePrototypeEncounter.Get() != InitializedEncounter ||
+			EncounterRuntimeState != EAmbientEncounterRuntimeState::Waiting || !bHasRuntimeEncounterDefinition)
 		{
-			SaveDirectorStateToSlot();
+			return EAmbientEncounterPreparationResult::Interrupted;
 		}
+
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterWaiting(InitializedEncounter);
 	}
 	else if (bHasSelectedEncounterSpawnTransform && IsValid(SelectedEncounterPoint))
 	{
-		// EQS Encounter는 스폰 뒤 위치 이동 X, Point가 있는 Authored 방식일 때만 위치 이동 
-		ActivePrototypeEncounter->SetActorTransform(SelectedEncounterSpawnTransform);
+		// Preserve the existing authored-point update behavior.
+		if (AActor* EncounterActor = PreparedEncounter.Get())
+		{
+			EncounterActor->SetActorTransform(SelectedEncounterSpawnTransform);
+		}
 	}
 
-	return IsValid(ActivePrototypeEncounter);
+	// Only the same valid Waiting encounter counts as a completed preparation.
+	AActor* const EncounterActor = PreparedEncounter.Get();
+	if (!EncounterActor || ActivePrototypeEncounter.Get() != EncounterActor ||
+		EncounterRuntimeState != EAmbientEncounterRuntimeState::Waiting || !bHasRuntimeEncounterDefinition)
+	{
+		return EAmbientEncounterPreparationResult::Interrupted;
+	}
+
+	if (bNeedsSpawn && bAutoSaveDirectorStateOnRuntimeChange)
+	{
+		SaveDirectorStateToSlot();
+	}
+
+	return EAmbientEncounterPreparationResult::Ready;
 }
 
 void AAmbientDirector::StartPrototypeEncounter()
 {
-	if (!IsValid(ActivePrototypeEncounter))
+	// 이미 다른 단계라면 활성화 처리를 반복하지 않는다.
+	if (EncounterRuntimeState != EAmbientEncounterRuntimeState::Waiting)
+	{
+		return;
+	}
+
+	AActor* const EncounterActor = ActivePrototypeEncounter.Get();
+
+	if (!IsValid(EncounterActor))
 	{
 		CurrentWorldState.EncounterRuntimeReason = TEXT("Cannot start encounter because actor is missing");
 		return;
 	}
 
-	EncounterRuntimeState = EAmbientEncounterRuntimeState::Active;
+	const float StartTimeSeconds = CurrentWorldState.GameTimeSeconds;
 
-	RuntimeEncounterStartedAtTimeSeconds = CurrentWorldState.GameTimeSeconds;
+	EncounterRuntimeState = EAmbientEncounterRuntimeState::Active;
+	RuntimeEncounterStartedAtTimeSeconds = StartTimeSeconds;
 
 	if (RuntimeEncounterRegionName == NAME_None)
 	{
@@ -765,21 +806,20 @@ void AAmbientDirector::StartPrototypeEncounter()
 		RuntimeEncounterPointName = CurrentWorldState.SelectedEncounterPointName;
 	}
 
-	EncounterStartCount++;
-
-	LastAnyEncounterStartTimeSeconds = CurrentWorldState.GameTimeSeconds;
-
-	if (ActivePrototypeEncounter->GetClass()->ImplementsInterface(
-		UAmbientEncounterRuntimeInterface::StaticClass()
-	))
-	{
-		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterActivated(
-			ActivePrototypeEncounter
-		);
-	}
+	++EncounterStartCount;
+	LastAnyEncounterStartTimeSeconds = StartTimeSeconds;
 
 	CurrentWorldState.EncounterRuntimeReason = TEXT("Player is involved in encounter");
 
+	// 콜백에서 Director에 종료를 요청할 수 있으므로,
+	// 상태와 시작 관련 기록을 모두 확정한 뒤 알린다.
+	if (EncounterActor->GetClass()->ImplementsInterface(UAmbientEncounterRuntimeInterface::StaticClass()))
+	{
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterActivated(EncounterActor);
+	}
+
+	// 콜백 안에서 Cleanup이나 Cooldown으로 넘어갔을 수 있다.
+	// 여기서는 Active용 상태나 설명을 다시 기록하지 않는다.
 	if (bAutoSaveDirectorStateOnRuntimeChange)
 	{
 		SaveDirectorStateToSlot();
@@ -793,11 +833,12 @@ void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
 		return;
 	}
 
-	DestroyPrototypeEncounter();
+	// Preserve the reason before resetting any runtime data it may reference.
+	CurrentWorldState.EncounterRuntimeReason = Reason;
 
+	// Cancel the preparation without changing completion history or pacing.
 	RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 	bHasRuntimeEncounterDefinition = false;
-
 	RuntimeEncounterRegionName = NAME_None;
 	RuntimeEncounterPointName = NAME_None;
 	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
@@ -807,9 +848,10 @@ void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
 	PrototypeCleanupEndTimeSeconds = 0.0f;
 	PrototypeCooldownEndTimeSeconds = 0.0f;
 	PendingPrototypeFinishReason = TEXT("None");
-
 	CurrentWorldState.DistanceToEncounter = 0.0f;
-	CurrentWorldState.EncounterRuntimeReason = Reason;
+
+	// Runtime data must be cleared before destruction callbacks can re-enter.
+	DestroyPrototypeEncounter();
 
 	if (bAutoSaveDirectorStateOnRuntimeChange)
 	{
@@ -819,43 +861,40 @@ void AAmbientDirector::RemoveWaitingPrototypeEncounter(const FString& Reason)
 
 void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)
 {
-	if (EncounterRuntimeState == EAmbientEncounterRuntimeState::Cleanup)
+	if (EncounterRuntimeState != EAmbientEncounterRuntimeState::Active)
 	{
 		return;
 	}
 
-	const FAmbientEncounterDefinition& Definition = GetPrototypeEncounterDefinition();
+	const float CleanupStartTimeSeconds = CurrentWorldState.GameTimeSeconds;
+	const float SafeCleanupDelay = FMath::Max(0.0f, GetPrototypeEncounterDefinition().CleanupDelaySeconds);
+
+	AActor* const EncounterActor = ActivePrototypeEncounter.Get();
+
+	// Complete the cleanup state before callbacks can re-enter the Director.
+	PendingPrototypeFinishReason = Reason;
+	PrototypeCleanupEndTimeSeconds = CleanupStartTimeSeconds + SafeCleanupDelay;
+
+	CurrentWorldState.EncounterRuntimeReason = FString::Printf(TEXT("Cleaning up: %s"), *Reason);
 
 	EncounterRuntimeState = EAmbientEncounterRuntimeState::Cleanup;
 
-	PendingPrototypeFinishReason = Reason;
-
-	if (IsValid(ActivePrototypeEncounter) &&
-		ActivePrototypeEncounter->GetClass()->ImplementsInterface(
-			UAmbientEncounterRuntimeInterface::StaticClass()
-		))
+	if (IsValid(EncounterActor) && EncounterActor->GetClass()->ImplementsInterface(UAmbientEncounterRuntimeInterface::StaticClass()))
 	{
-		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterCleanup(
-			ActivePrototypeEncounter,
-			Reason
-		);
+		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterCleanup(EncounterActor, Reason);
 	}
 
-	const float Now = CurrentWorldState.GameTimeSeconds;
-	const float SafeCleanupDelay = FMath::Max(0.0f, Definition.CleanupDelaySeconds);
-
-	PrototypeCleanupEndTimeSeconds = Now + SafeCleanupDelay;
+	// The callback may have already advanced the runtime state.
+	if (EncounterRuntimeState != EAmbientEncounterRuntimeState::Cleanup)
+	{
+		return;
+	}
 
 	if (SafeCleanupDelay <= 0.0f)
 	{
 		FinishPrototypeEncounter(Reason);
 		return;
 	}
-
-	CurrentWorldState.EncounterRuntimeReason = FString::Printf(
-		TEXT("Cleaning up: %s"),
-		*Reason
-	);
 
 	if (bAutoSaveDirectorStateOnRuntimeChange)
 	{
@@ -865,32 +904,27 @@ void AAmbientDirector::BeginPrototypeCleanup(const FString& Reason)
 
 void AAmbientDirector::FinishPrototypeEncounter(const FString& Reason)
 {
-	const float FinishTime = CurrentWorldState.GameTimeSeconds;
-
-	if (IsValid(ActivePrototypeEncounter) &&
-		ActivePrototypeEncounter->GetClass()->ImplementsInterface(
-			UAmbientEncounterRuntimeInterface::StaticClass()
-		))
+	if (EncounterRuntimeState != EAmbientEncounterRuntimeState::Cleanup)
 	{
-		IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterFinished(
-			ActivePrototypeEncounter,
-			Reason
-		);
+		return;
 	}
 
+	const float FinishTimeSeconds = CurrentWorldState.GameTimeSeconds;
+	const FString FinishReason = Reason;
+	const TWeakObjectPtr<AActor> FinishedEncounter(ActivePrototypeEncounter.Get());
 	const FAmbientEncounterDefinition& FinishedDefinition = GetPrototypeEncounterDefinition();
 
+	// Record completion while the finished encounter's runtime data is intact.
 	if (FinishedDefinition.bOneShot && FinishedDefinition.EncounterId != NAME_None)
 	{
 		CompletedEncounterIds.Add(FinishedDefinition.EncounterId);
 	}
 
-	AddPrototypeHistoryEntry(FinishTime, Reason);
+	AddPrototypeHistoryEntry(FinishTimeSeconds, FinishReason);
+	++EncounterFinishCount;
 
-	EncounterFinishCount++;
-
-	DestroyPrototypeEncounter();
-
+	// Complete the state transition before notifying external code.
+	ActivePrototypeEncounter = nullptr;
 	RuntimeEncounterStartedAtTimeSeconds = 0.0f;
 	RuntimeEncounterRegionName = NAME_None;
 	RuntimeEncounterPointName = NAME_None;
@@ -900,8 +934,21 @@ void AAmbientDirector::FinishPrototypeEncounter(const FString& Reason)
 	PrototypeCleanupEndTimeSeconds = 0.0f;
 
 	StartPrototypeCooldown();
+	CurrentWorldState.EncounterRuntimeReason = FString::Printf(TEXT("Finished encounter: %s"), *FinishReason);
 
-	CurrentWorldState.EncounterRuntimeReason = FString::Printf(TEXT("Finished encounter: %s"), *Reason);
+	if (AActor* EncounterActor = FinishedEncounter.Get())
+	{
+		if (EncounterActor->GetClass()->ImplementsInterface(UAmbientEncounterRuntimeInterface::StaticClass()))
+		{
+			IAmbientEncounterRuntimeInterface::Execute_OnAmbientEncounterFinished(EncounterActor, FinishReason);
+		}
+	}
+
+	// The callback may have destroyed the actor, so resolve it again.
+	if (AActor* EncounterActor = FinishedEncounter.Get())
+	{
+		EncounterActor->Destroy();
+	}
 
 	if (bAutoSaveDirectorStateOnRuntimeChange)
 	{
@@ -935,12 +982,15 @@ void AAmbientDirector::StartPrototypeCooldown()
 
 void AAmbientDirector::DestroyPrototypeEncounter()
 {
-	if (IsValid(ActivePrototypeEncounter))
-	{
-		ActivePrototypeEncounter->Destroy();
-	}
+	AActor* const EncounterToDestroy = ActivePrototypeEncounter.Get();
 
+	// Detach before destruction callbacks can re-enter the Director.
 	ActivePrototypeEncounter = nullptr;
+
+	if (IsValid(EncounterToDestroy))
+	{
+		EncounterToDestroy->Destroy();
+	}
 }
 
 void AAmbientDirector::AddPrototypeHistoryEntry(float FinishedAtTimeSeconds, const FString& FinishReason)

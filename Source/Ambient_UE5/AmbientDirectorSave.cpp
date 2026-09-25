@@ -52,6 +52,12 @@ void AAmbientDirector::ClearDirectorSaveSlot()
 
 bool AAmbientDirector::SaveDirectorStateInternal(FString& OutReason) const
 {
+	if (bIsApplyingDirectorSave)
+	{
+		OutReason = TEXT("Cannot save while applying Director save data");
+		return false;
+	}
+
 	if (DirectorSaveSlotName.IsEmpty())
 	{
 		OutReason = TEXT("Save slot name is empty");
@@ -194,19 +200,31 @@ void AAmbientDirector::BuildDirectorSaveSnapshot(FAmbientDirectorSaveSnapshot& O
 
 bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnapshot& Snapshot, FString& OutReason)
 {
-	const bool bMigratingVersion1 = Snapshot.SaveVersion == 1;
-
-	if (!bMigratingVersion1 && Snapshot.SaveVersion != 2)
+	if (bIsUpdatingWorldState || bIsApplyingDirectorSave)
 	{
-		OutReason = FString::Printf(
-			TEXT("Unsupported save version: %d"),
-			Snapshot.SaveVersion
-		);
+		OutReason = TEXT("Cannot apply save data while the Director is updating or loading");
 		return false;
 	}
 
-	DestroyPrototypeEncounter();
+	const bool bMigratingVersion1 = Snapshot.SaveVersion == 1;
+	if (!bMigratingVersion1 && Snapshot.SaveVersion != 2)
+	{
+		OutReason = FString::Printf(TEXT("Unsupported save version: %d"), Snapshot.SaveVersion);
+		return false;
+	}
 
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		OutReason = TEXT("Cannot apply Director save data without a world");
+		return false;
+	}
+
+	// Keep update, save, and nested load requests out of the application phase.
+	TGuardValue<bool> ApplyGuard(bIsApplyingDirectorSave, true);
+	const float LoadTimeSeconds = static_cast<float>(World->GetTimeSeconds());
+
+	// Restore recorded data without replaying encounter lifecycle events.
 	PrototypeEncounterHistory = Snapshot.PrototypeEncounterHistory;
 	EncounterStartCount = Snapshot.EncounterStartCount;
 	EncounterFinishCount = Snapshot.EncounterFinishCount;
@@ -223,21 +241,14 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 		}
 	}
 
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
+	// Reconstruct the pacing baseline in the current world's time domain.
 	if (MinimumSecondsBetweenEncounterStarts > 0.0f)
 	{
-		const float Remaining =
-			FMath::Clamp(
-				Snapshot.GlobalPacingRemainingSeconds,
-				0.0f,
-				MinimumSecondsBetweenEncounterStarts
-			);
+		const float RemainingSeconds = FMath::Clamp(
+			Snapshot.GlobalPacingRemainingSeconds, 0.0f, MinimumSecondsBetweenEncounterStarts);
 
-		LastAnyEncounterStartTimeSeconds =
-			Remaining > 0.0f
-			? Now -
-			(MinimumSecondsBetweenEncounterStarts - Remaining)
+		LastAnyEncounterStartTimeSeconds = RemainingSeconds > 0.0f
+			? LoadTimeSeconds - (MinimumSecondsBetweenEncounterStarts - RemainingSeconds)
 			: -999999.0f;
 	}
 	else
@@ -245,6 +256,7 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 		LastAnyEncounterStartTimeSeconds = -999999.0f;
 	}
 
+	// Loading discards the in-progress encounter without recording a finish.
 	EncounterRuntimeState = EAmbientEncounterRuntimeState::Waiting;
 	RuntimeEncounterDefinition = FAmbientEncounterDefinition();
 	bHasRuntimeEncounterDefinition = false;
@@ -253,33 +265,43 @@ bool AAmbientDirector::ApplyDirectorSaveSnapshot(const FAmbientDirectorSaveSnaps
 	RuntimeEncounterPointName = NAME_None;
 	RuntimeEncounterLocation = FVector::ZeroVector;
 	RuntimeEncounterLocationSource = TEXT("Unknown");
-
 	PrototypeCleanupEndTimeSeconds = 0.0f;
 	PrototypeCooldownEndTimeSeconds = 0.0f;
 	PendingPrototypeFinishReason = TEXT("None");
 
-	CurrentWorldState.DistanceToEncounter = 0.0f;
-	CurrentWorldState.EncounterCleanupRemainingSeconds = 0.0f;
-	CurrentWorldState.EncounterCooldownRemainingSeconds = 0.0f;
+	// A selection made before loading must not survive into the next evaluation.
+	CurrentRegion = nullptr;
+	SelectedEncounterPoint = nullptr;
+	SelectedEncounterDefinitionAsset = nullptr;
+	SelectedEncounterDefinition = FAmbientEncounterDefinition();
+	bHasSelectedEncounterDefinition = false;
+	SelectedEncounterScore = 0.0f;
+	SelectedEncounterReason = TEXT("Awaiting fresh selection after load");
+	LastSelectionDebugEntries.Reset();
+	SelectedEncounterSpawnTransform = FTransform::Identity;
+	bHasSelectedEncounterSpawnTransform = false;
+	SelectedEncounterLocationReason = TEXT("No selected encounter spawn transform");
+
+	CurrentWorldState = FAmbientWorldState();
+	CurrentWorldState.GameTimeSeconds = LoadTimeSeconds;
+	CurrentWorldState.MaxEncounterBudget = MaxSimultaneousPrototypeEncounters;
+	CurrentWorldState.GlobalPacingRemainingSeconds = GetGlobalPacingRemaining();
+	SyncTraversalWorldState();
 
 	OutReason = bMigratingVersion1
-		? TEXT(
-			"Loaded version 1 durable data; "
-			"transient encounter state was discarded"
-		)
-		: TEXT(
-			"Loaded durable Director state; "
-			"runtime normalized to Waiting"
-		);
+		? TEXT("Loaded version 1 durable data; transient encounter state was discarded")
+		: TEXT("Loaded durable Director state; runtime normalized to Waiting");
 
+	CurrentWorldState.EncounterBlockReason = TEXT("Awaiting fresh world evaluation after load");
+	CurrentWorldState.EncounterRuntimeReason = OutReason;
+
+	// The helper detaches the actor before its destruction callbacks execute.
+	DestroyPrototypeEncounter();
 	return true;
 }
 
-bool AAmbientDirector::RestoreRuntimeEncounterFromSave(
-	const FAmbientDirectorSaveSnapshot& Snapshot,
-	const FAmbientEncounterDefinition& RestoredDefinition,
-	FString& OutReason
-)
+bool AAmbientDirector::RestoreRuntimeEncounterFromSave(const FAmbientDirectorSaveSnapshot& Snapshot,
+	const FAmbientEncounterDefinition& RestoredDefinition, FString& OutReason)
 {
 	auto FailRestore = [this, &OutReason](const FString& Reason) -> bool
 	{

@@ -62,8 +62,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Ambient Encounter Runtime")
 	void OnAmbientEncounterCleanup(const FString& Reason);
 
-	// Director가 종료 이력을 기록하고 액터를 제거하기 전에 호출한다.
-	// 액터가 바로 제거될 수 있어, 여기서 표시한 내용이 화면에 보인다는 보장은 없다.
+	// Called after the Director records completion and leaves Cleanup,
+	// but before it requests destruction of this actor.
+	// Use the initialization context for encounter metadata.
+	// This notification does not imply a successful outcome.
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Ambient Encounter Runtime")
 	void OnAmbientEncounterFinished(const FString& Reason);
 };

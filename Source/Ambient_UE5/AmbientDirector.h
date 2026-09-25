@@ -15,6 +15,13 @@ class AAmbientEncounterPoint;
 class UAmbientEncounterDefinitionData;
 struct FAmbientDirectorSaveSnapshot;
 
+enum class EAmbientEncounterPreparationResult : uint8
+{
+	Ready,
+	Failed,
+	Interrupted
+};
+
 UCLASS(Blueprintable)
 class AMBIENT_UE5_API AAmbientDirector : public AActor
 {
@@ -269,11 +276,12 @@ private:
 	UFUNCTION()
 	void UpdateWorldState();
 
-	void UpdateCurrentRegion(const APawn* PlayerPawn);
+	// 갱신해서 얻은 플레이어 위치로 현재 Region을 갱신.
+	void UpdateCurrentRegion(const FVector& QueryLocation);
 
 	/**
-	 * 현재 월드 상태에 맞는 Encounter 후보와 배치 위치를 선택한 후
-	 * UpdateWorldState에서 선택 정보를 초기화, 플레이어·리전 정보를 수집한 뒤 호출.
+	 * 현재 월드 상태에 맞는 Encounter 후보와 배치 위치를 선택.
+	 * UpdateWorldState에서 선택 정보를 초기화하고 플레이어·리전 정보를 수집한 뒤 호출.
 	 */
 	void SelectEncounterDefinitionAndPoint();
 
@@ -361,8 +369,10 @@ private:
 
 	const FAmbientEncounterDefinition& GetPrototypeEncounterDefinition() const;
 
-	bool TrySpawnOrUpdatePrototypeEncounter();
+	/** 액터가 없는 대기 상태에서 생성을 시도하고, 생성 후 액터가 유효하면 true를 반환한다. */
+	EAmbientEncounterPreparationResult TrySpawnOrUpdatePrototypeEncounter();
 
+	/** Waiting 중인 Encounter를 Active로 전환하고 활성화를 알린다. */
 	void StartPrototypeEncounter();
 
 	void RemoveWaitingPrototypeEncounter(const FString& Reason);
@@ -373,6 +383,10 @@ private:
 
 	void StartPrototypeCooldown();
 
+	/**
+	 * Encounter Actor의 제거를 요청하고 참조를 비운다.
+	 * 실행 정보 초기화와 종료 이력 처리는 호출한 쪽에서 수행한다.
+	 */
 	void DestroyPrototypeEncounter();
 
 	void AddPrototypeHistoryEntry(float FinishedAtTimeSeconds, const FString& FinishReason);
@@ -404,6 +418,8 @@ private:
 	) const;
 
 	FTimerHandle WorldStateTimerHandle;
+	bool bIsUpdatingWorldState = false;
+	bool bIsApplyingDirectorSave = false;
 
 	void SyncTraversalWorldState();
 
